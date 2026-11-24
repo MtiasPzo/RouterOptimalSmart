@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="es-CL">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="description" content="Prototipo académico para estimar y comparar la señal Wi-Fi en una vivienda.">
+  <title>RouterOptimalSmart · Cobertura Wi-Fi</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="./styles.css">
+  <script type="module" src="./app.mjs"></script>
+</head>
+<body>
+  <a class="skip" href="#main">Ir al simulador</a>
+  <header class="site-header">
+    <div class="wrap header-inner">
+      <a class="brand" href="#"><span class="brand-mark" aria-hidden="true"><i></i></span><span>RouterOptimal<span>Smart</span></span></a>
+      <nav aria-label="Navegación principal"><a href="#resultados">Resultados</a><a href="#modelo">Modelo matemático</a></nav>
+    </div>
+  </header>
+  <main class="wrap" id="main">
+    <section class="intro">
+      <div>
+        <p class="eyebrow">ABPro · Funciones y Matrices</p>
+        <h1>Simulador de cobertura Wi-Fi</h1>
+        <p>Traza o importa un plano, mueve el router y compara la señal en los puntos que te interesan.</p>
+      </div>
+      <span class="badge"><span></span> Estimación · sin mediciones</span>
+    </section>
+
+    <section class="workspace" aria-label="Área de simulación">
+      <article class="card map-card">
+        <header class="card-header map-header">
+          <div><h2>Plano de la vivienda</h2><p id="plan-meta"></p></div>
+          <div class="segmented" id="floor-tabs" aria-label="Piso visible">
+            <button type="button" data-floor="0">Piso 1</button><button type="button" data-floor="1">Piso 2</button>
+          </div>
+        </header>
+        <div class="map-toolbar" aria-label="Herramientas del plano">
+          <button type="button" class="tool" data-mode="select">Seleccionar</button>
+          <button type="button" class="tool" data-mode="wall">Dibujar muro</button>
+          <button type="button" class="tool" data-mode="point">Marcar punto</button>
+          <button type="button" class="tool" data-mode="router">Mover router</button>
+          <label for="heat" class="heat-toggle"><input type="checkbox" id="heat" checked data-help="Colorea el plano según la fuerza estimada del Wi-Fi. Los tonos amarillos muestran más señal y los morados, menos."> Colorear por señal</label>
+        </div>
+        <figure class="map-stage">
+          <canvas id="plan" aria-label="Plano interactivo. Los formularios permiten editar el plano mediante coordenadas." aria-describedby="map-hint"></canvas>
+        </figure>
+        <footer class="map-footer">
+          <p id="map-hint" aria-live="polite"></p>
+          <div class="heat-legend" aria-label="Intensidad de la señal" data-help="dBm significa decibelios respecto a un milivatio y expresa la fuerza de la señal. Un valor mayor indica más señal. Por ejemplo, −50 dBm es más fuerte que −70 dBm.">
+            <span>−90</span><i></i><span>−35 dBm</span>
+          </div>
+        </footer>
+      </article>
+
+      <aside class="controls" aria-label="Configuración del simulador">
+        <article class="card control-card">
+          <header><h2>Tu vivienda</h2></header>
+          <div class="sample-row">
+            <label for="example">Ejemplos y plano nuevo</label>
+            <select id="example" data-help="Elige un ejemplo para probar el simulador o un plano en blanco para dibujar tu vivienda. El ejemplo del plano de la entrega ya trae las imágenes de los dos pisos.">
+              <option value="">Elige cómo empezar</option><option value="one">Ejemplo · un piso</option>
+              <option value="two">Ejemplo · dos pisos</option><option value="cad">Plano de la entrega · dos pisos</option>
+              <option value="blank">Plano en blanco</option>
+            </select>
+          </div>
+          <form id="building-form" novalidate>
+            <div class="field-grid">
+              <div><label for="floor-count">Número de pisos</label><select id="floor-count" name="count" data-help="Elige si quieres representar uno o dos pisos. Si eliges dos, podrás cambiar de piso con las pestañas encima del plano."><option value="1">1 piso</option><option value="2">2 pisos</option></select></div>
+              <div><label for="floor-height">Altura entre pisos (metros)</label><input id="floor-height" name="floorHeight" inputmode="decimal" type="number" step="any" value="2.7" data-help="Es la distancia vertical desde el suelo del primer piso hasta el suelo del segundo. Se usa para calcular la distancia cuando el router y el lugar están en pisos distintos."></div>
+            </div>
+            <p class="field-note">Altura inicial de ejemplo de 2,7 m.</p>
+            <button type="submit" class="button small">Aplicar vivienda</button>
+          </form>
+          <div class="divider"></div>
+          <div class="field-grid route-grid">
+            <button type="button" class="button" id="route-draw">Dibujar</button>
+            <button type="button" class="button" id="route-import">Importar plano</button>
+          </div>
+          <form id="dimensions-form" novalidate>
+            <div class="field-grid">
+              <div><label for="plan-width">Ancho (metros)</label><input id="plan-width" name="width" inputmode="decimal" type="number" step="any" data-help="Mide de izquierda a derecha el espacio que quieres representar en el plano. Por ejemplo, escribe 8 si el piso mide 8 metros de ancho."></div>
+              <div><label for="plan-depth">Fondo (metros)</label><input id="plan-depth" name="height" inputmode="decimal" type="number" step="any" data-help="Mide el espacio desde el frente hasta el fondo. En el plano, esa medida se representa de arriba hacia abajo."></div>
+            </div>
+            <button type="submit" class="button small">Aplicar medidas</button>
+          </form>
+          <div id="import-panel" hidden>
+            <label for="file">Archivo del plano</label>
+            <input id="file" type="file" accept=".dwg,.png,.jpg,.jpeg,.webp,.bmp" data-help="Sube una imagen del piso que estás viendo, o un archivo DWG, que es un formato de dibujo técnico. Después podrás indicar cuánto mide el plano y marcar sus muros.">
+            <p class="field-note" id="import-status">Puedes subir una imagen o un dibujo técnico en formato DWG.</p>
+            <div class="field-grid">
+              <button type="button" class="button small" id="crop">Recortar vista</button>
+              <button type="button" class="button small" id="calibrate">Marcar escala</button>
+            </div>
+            <form id="calibration-form" novalidate hidden>
+              <label for="known-distance">Distancia marcada (metros)</label><input id="known-distance" name="metres" inputmode="decimal" type="number" step="any" data-help="Marca dos puntos en la imagen y escribe cuántos metros hay entre ellos en la vivienda. Por ejemplo, marca los extremos de un muro que sabes que mide 3 metros y escribe 3.">
+              <button class="button small primary" type="submit">Confirmar escala</button>
+            </form>
+          </div>
+        </article>
+
+        <article class="card control-card">
+          <header class="band-header"><h2>Banda Wi-Fi</h2><div class="segmented" id="band-tabs" aria-label="Banda Wi-Fi" data-help="2,4 y 5 GHz son dos frecuencias de Wi-Fi. GHz significa gigahercios. Cambia de banda para ver cómo varía la señal estimada en el mismo plano.">
+            <button type="button" data-band="2.4">2,4 GHz</button><button type="button" data-band="5">5 GHz</button>
+          </div></header>
+          <details class="parameter-details">
+            <summary>Ajustes avanzados de señal</summary>
+            <form id="band-form" novalidate>
+              <div class="field-grid">
+                <div><label for="router-power">Potencia del router</label><input id="router-power" name="eirp" inputmode="decimal" type="number" step="any" data-help="Indica cuánta potencia emite el router teniendo en cuenta su antena. En las especificaciones se llama potencia isotrópica radiada equivalente (EIRP o PIRE) y se expresa en dBm."></div>
+                <div><label for="receiver-gain">Aporte de la antena receptora</label><input id="receiver-gain" name="gain" inputmode="decimal" type="number" step="any" data-help="Es la ganancia de la antena del dispositivo que recibe el Wi-Fi. Se mide en dBi, que compara esa antena con una antena ideal que recibe por igual en todas direcciones. Si no conoces este valor, puedes dejar el 0 de ejemplo."></div>
+                <div><label for="distance-drop">Caída con la distancia</label><input id="distance-drop" name="exponent" inputmode="decimal" type="number" step="any" data-help="Determina qué tan rápido baja la señal cuando te alejas del router. En la fórmula se llama exponente n. Un número mayor hace que la señal baje más rápido."></div>
+                <div><label for="floor-loss">Pérdida entre pisos</label><input id="floor-loss" name="slab" inputmode="decimal" type="number" step="any" data-help="Indica cuánto se debilita la señal al atravesar el suelo que separa un piso de otro, también llamado losa. La pérdida se mide en decibelios (dB)."></div>
+              </div>
+              <p class="field-note">Son valores de ejemplo. Puedes dejarlos así para probar el simulador.</p>
+              <button type="submit" class="button small">Aplicar parámetros</button>
+            </form>
+          </details>
+        </article>
+      </aside>
+
+      <article class="card control-card editor-card">
+        <header><h2>Elementos del plano</h2><p id="editor-note"></p></header>
+        <div class="editor-layout">
+          <div>
+            <label for="element-list">Qué quieres editar</label>
+            <select id="element-list" data-help="Elige un muro, un lugar marcado o el router para ver o cambiar sus datos. También puedes agregar un muro o un lugar escribiendo sus medidas."></select>
+            <button type="button" class="button small" id="edit-router">Ingresar posición del router</button>
+          </div>
+          <form id="element-form" novalidate>
+            <div id="wall-fields" hidden>
+              <div class="field-grid wall-properties">
+                <div><label for="wall-material">De qué está hecho el muro</label><select id="wall-material" name="material" data-help="Elige el material principal del muro, como madera o ladrillo. Al elegirlo aparecen valores de ejemplo sobre cuánto debilita la señal."></select></div>
+                <div><label for="wall-thickness">Grosor (centímetros)</label><input id="wall-thickness" name="thickness" inputmode="decimal" type="number" step="any" data-help="Mide de una cara del muro a la otra. Por ejemplo, si tiene 12 centímetros de grosor, escribe 12."></div>
+                <div><label for="wall-loss-24">Pérdida a 2,4 GHz por 10 cm</label><input id="wall-loss-24" name="loss24" inputmode="decimal" type="number" step="any" data-help="Es cuánto se debilita el Wi-Fi de 2,4 GHz por cada 10 centímetros de este material. Se mide en decibelios (dB). Si no conoces el dato, deja el valor de ejemplo."></div>
+                <div><label for="wall-loss-5">Pérdida a 5 GHz por 10 cm</label><input id="wall-loss-5" name="loss5" inputmode="decimal" type="number" step="any" data-help="Es cuánto se debilita el Wi-Fi de 5 GHz por cada 10 centímetros de este material. Se mide en decibelios (dB). Si no conoces el dato, deja el valor de ejemplo."></div>
+              </div>
+              <p class="field-note">Al elegir material se cargan pérdidas de ejemplo. Ajusta ambos valores para este muro.</p>
+            </div>
+            <div id="name-field" hidden><label for="point-name">Nombre del lugar</label><input id="point-name" name="pointName" type="text" maxlength="45" data-help="Escribe un nombre que te ayude a reconocer dónde quieres probar la señal, como Escritorio o Dormitorio."></div>
+            <div class="field-grid coordinates">
+              <div><label id="coord-x-label" for="coord-x">Desde la izquierda (metros)</label><input id="coord-x" name="x" inputmode="decimal" type="number" step="any" data-help="Es la distancia en línea recta desde el borde izquierdo del plano hasta el lugar marcado, el router o el inicio del muro. También se llama coordenada X."></div>
+              <div><label id="coord-y-label" for="coord-y">Desde arriba (metros)</label><input id="coord-y" name="y" inputmode="decimal" type="number" step="any" data-help="Es la distancia hacia abajo desde el borde superior del plano hasta el lugar marcado, el router o el inicio del muro. También se llama coordenada Y."></div>
+              <div class="end-field" hidden><label for="coord-x-end">Final desde la izquierda (metros)</label><input id="coord-x-end" name="x2" inputmode="decimal" type="number" step="any" data-help="Mide hacia la derecha, desde el borde izquierdo del plano hasta el extremo final del muro. Es la coordenada X del final."></div>
+              <div class="end-field" hidden><label for="coord-y-end">Final desde arriba (metros)</label><input id="coord-y-end" name="y2" inputmode="decimal" type="number" step="any" data-help="Mide hacia abajo, desde el borde superior del plano hasta el extremo final del muro. Es la coordenada Y del final."></div>
+            </div>
+            <div class="button-row"><button class="button small primary" type="submit" id="apply-element">Aplicar</button><button class="button small danger" type="button" id="delete-element" hidden>Borrar</button></div>
+          </form>
+        </div>
+      </article>
+    </section>
+
+    <p id="feedback" class="feedback" role="status" aria-live="polite" hidden></p>
+
+    <section class="results" id="resultados" aria-label="Resultados de simulación">
+      <article class="card result-card">
+        <header class="card-header"><div><h2>Señal por punto</h2><p id="point-summary"></p></div><span class="band-pill" data-band-label></span></header>
+        <div class="result-body" id="point-results"></div>
+      </article>
+      <article class="card result-card">
+        <header class="card-header"><div><h2>Comparar posiciones</h2><p>La mejor posición es la que deja su punto más débil con más señal.</p></div><span class="band-pill" data-band-label></span></header>
+        <div class="result-body">
+          <form id="save-form" class="save-line" novalidate>
+            <div><label for="position-name">Nombre de la posición</label><input id="position-name" type="text" name="positionName" maxlength="35" placeholder="Ej. Junto al escritorio" data-help="Ponle un nombre a la ubicación actual del router para poder distinguirla de otras al comparar."></div>
+            <button type="submit" class="button primary" id="save-position">Guardar posición</button>
+          </form>
+          <div id="comparison"></div>
+        </div>
+      </article>
+    </section>
+
+    <section class="card model-card" id="modelo">
+      <details>
+        <summary>Modelo matemático y supuestos</summary>
+        <div class="model-grid">
+          <div><h3>Distancia y dirección</h3>
+            <p class="formula">d₂ᴅ = √(Δx² + Δy²)<br>d₃ᴅ = √(Δx² + Δy² + Δz²)<br>θ = atan2(Δy, Δx)</p>
+            <p>Las diferencias son del punto respecto del router. X crece a la derecha, Y hacia abajo y Z hacia arriba. Δz es cero en el mismo piso y equivale a la separación entre pisos, con su signo, en el otro. La tabla muestra θ en grados. Una antena omnidireccional usa el ángulo solo para describir el trayecto.</p>
+          </div>
+          <div><h3>Referencia y pérdida</h3>
+            <p class="formula">L<sub>FSPL</sub>(f, d₀) = 20 log₁₀(4π f d₀ / c)<br>S<sub>b</sub>(d₀) = P<sub>EIRP,b</sub> + G<sub>receptor,b</sub> − L<sub>FSPL</sub><br>S<sub>b</sub>(d) = S<sub>b</sub>(d₀) − 10 n<sub>b</sub> log₁₀(max(d,d₀)/d₀) − ΣL<sub>muro,b</sub> − L<sub>losa,b</sub></p>
+            <p>d₀ = 1 m, f es 2,4 o 5 GHz en Hz y c = 299 792 458 m/s. P es potencia radiada equivalente en dBm, G es ganancia de recepción en dBi y n es un exponente sin unidad. El resultado S está en dBm y las pérdidas se restan en dB. La frecuencia se aplica una vez, en la referencia.</p>
+          </div>
+          <div><h3>Obstáculos y matriz de resultados</h3>
+            <p>Los muros cuentan por cruce transversal entre segmentos. La pérdida de cada muro equivale al valor editable por 10 cm multiplicado por su grosor en unidades de 10 cm. Entre pisos se revisa la primera mitad del trayecto en el piso de salida y la segunda mitad en el de llegada. La losa se suma una vez si cambia el piso.</p>
+            <p>El mapa evalúa una cuadrícula de coordenadas y la pinta por intensidad. En la comparación, las filas son posiciones y las columnas son puntos. Se calcula el mínimo por fila y se elige el mayor de esos mínimos.</p>
+          </div>
+        </div>
+        <p class="model-limit">Potencia, altura, pérdidas y materiales iniciales son supuestos de demostración. El modelo usa rayos rectos y una regla lineal simplificada para el grosor. Omite rebotes, interferencias y variaciones por mobiliario o aberturas sin marcar. Los dBm estimados no garantizan velocidad, ping, estabilidad ni cobertura.</p>
+      </details>
+    </section>
+  </main>
+  <footer class="site-footer"><div class="wrap">RouterOptimalSmart <span>Prototipo académico para Funciones y Matrices</span></div></footer>
+</body>
+</html>
+
