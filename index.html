@@ -14,7 +14,7 @@
   <a class="skip" href="#main">Ir al simulador</a>
   <header class="site-header">
     <div class="wrap header-inner">
-      <a class="brand" href="#"><span class="brand-mark" aria-hidden="true"><i></i></span><span>RouterOptimal<span>Smart</span></span></a>
+      <span class="brand"><span class="brand-mark" aria-hidden="true"><i></i></span><span>RouterOptimal<span>Smart</span></span></span>
       <nav aria-label="Navegación principal"><a href="#resultados">Resultados</a><a href="#modelo">Modelo matemático</a></nav>
     </div>
   </header>
@@ -57,13 +57,15 @@
       <aside class="controls" aria-label="Configuración del simulador">
         <article class="card control-card">
           <header><h2>Tu vivienda</h2></header>
-          <div class="sample-row">
-            <label for="example">Ejemplos y plano nuevo</label>
-            <select id="example" data-help="Elige un ejemplo para probar el simulador o un plano en blanco para dibujar tu vivienda. El ejemplo del plano de la entrega ya trae las imágenes de los dos pisos.">
-              <option value="">Elige cómo empezar</option><option value="one">Ejemplo · un piso</option>
-              <option value="two">Ejemplo · dos pisos</option><option value="cad">Plano de la entrega · dos pisos</option>
-              <option value="blank">Plano en blanco</option>
-            </select>
+          <div class="sample-picker">
+            <p class="picker-label">Elige cómo empezar</p>
+            <button type="button" class="button" id="example-button" aria-haspopup="listbox" aria-expanded="false" aria-label="Elige cómo empezar" data-help="Elige un ejemplo para probar el simulador o un plano en blanco para dibujar tu vivienda. El ejemplo del plano de la entrega ya trae las imágenes de los dos pisos.">Elige cómo empezar</button>
+            <div class="sample-options" id="example-options" role="listbox" aria-label="Ejemplos y plano nuevo" hidden>
+              <button type="button" role="option" data-example="one">Ejemplo · un piso</button>
+              <button type="button" role="option" data-example="two">Ejemplo · dos pisos</button>
+              <button type="button" role="option" data-example="cad">Plano de la entrega · dos pisos</button>
+              <button type="button" role="option" data-example="blank">Plano en blanco</button>
+            </div>
           </div>
           <form id="building-form" novalidate>
             <div class="field-grid">

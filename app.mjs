@@ -87,12 +87,19 @@ function setMode(mode) {
   state.draft = null;
 }
 
+function pulse() {
+  canvas.classList.remove('recalc');
+  void canvas.offsetWidth;
+  canvas.classList.add('recalc');
+}
+
 function selectFloor(index) {
   state.activeFloor = index;
   state.selection = null;
   setMode(ready(floor()) ? 'select' : 'calibration');
   write('calibration', { metres: '' });
   render();
+  pulse();
 }
 
 function renderPlan() {
@@ -105,8 +112,8 @@ function renderPlan() {
   }
   const hints = {
     select: 'Toca un muro o punto para editarlo. También puedes usar la lista de elementos.',
-    wall: state.draft ? 'Completa el material y el grosor en Elementos del plano.' :
-      state.wallStart ? 'Marca el segundo extremo del muro.' : 'Marca los dos extremos del muro.',
+    wall: state.wallStart ? 'Marca el segundo extremo del muro.' :
+      'Marca los dos extremos del muro. Se crea con tabique por defecto; ajústalo en Elementos del plano.',
     point: 'Toca el lugar que quieres evaluar. Puedes cambiar su nombre en Elementos del plano.',
     router: state.building.router ? 'Toca otra posición disponible para mover el router.' :
       'Toca una posición disponible en este piso para colocar el router.',
@@ -310,13 +317,14 @@ $('#band-tabs').addEventListener('click', event => {
   renderControls();
   renderPlan();
   renderResults();
+  pulse();
 });
 for (const button of $$('.tool[data-mode]')) button.addEventListener('click', () => {
   setMode(button.dataset.mode);
   renderEditor();
   renderPlan();
 });
-$('#heat').addEventListener('change', event => { state.heat = event.target.checked; renderPlan(); });
+$('#heat').addEventListener('change', event => { state.heat = event.target.checked; renderPlan(); pulse(); });
 
 $('#route-draw').addEventListener('click', () => {
   const item = floor();
@@ -480,6 +488,7 @@ function placeRouter(p) {
   state.building.router = { ...p, floor: state.activeFloor };
   state.selection = { kind: 'router', id: 'router' };
   render();
+  pulse();
 }
 
 canvas.addEventListener('click', event => {
@@ -496,20 +505,31 @@ canvas.addEventListener('click', event => {
       announce('El muro necesita dos extremos distintos.', true);
       return;
     }
-    state.draft = { kind: 'wall', a: state.wallStart, b: p };
+    if (floor().walls.some(wall => sameWall(wall, { a: state.wallStart, b: p }))) {
+      announce('Ya existe un muro con esos dos extremos.', true);
+      state.wallStart = null;
+      renderPlan();
+      return;
+    }
+    const id = `wall-${++nextId}`;
+    floor().walls.push({ id, a: state.wallStart, b: p, material: 'tabique',
+      thickness: 0.1, losses: { ...MATERIALS.tabique.losses } });
     state.wallStart = null;
-    state.selection = { kind: 'wall', id: 'new-wall' };
-    renderEditor();
-    renderPlan();
+    state.selection = { kind: 'wall', id };
+    render();
+    pulse();
     return;
   }
   if (state.mode === 'point') {
+    const name = window.prompt('Nombre del punto de interés:');
+    if (name === null) return;
     const id = `point-${++nextId}`;
     let index = floor().points.length + 1;
-    while (floor().points.some(p => p.name === `Punto ${index}`)) index++;
-    floor().points.push({ ...p, id, name: `Punto ${index}`, floor: state.activeFloor });
+    while (floor().points.some(item => item.name === `Punto ${index}`)) index++;
+    floor().points.push({ ...p, id, name: name.trim() || `Punto ${index}`, floor: state.activeFloor });
     state.selection = { kind: 'point', id };
     render();
+    pulse();
     return;
   }
   const router = state.building.router?.floor === state.activeFloor ? state.building.router : null;
@@ -538,6 +558,19 @@ $('#element-list').addEventListener('change', event => {
   renderPlan();
 });
 $('#edit-router').addEventListener('click', () => useSelection('router', 'router'));
+
+document.addEventListener('keydown', event => {
+  if (event.key !== 'Escape') return;
+  if (state.wallStart) { state.wallStart = null; renderPlan(); }
+  else if (state.draft) { state.draft = null; state.selection = null; renderEditor(); renderPlan(); }
+});
+document.addEventListener('keydown', event => {
+  if ((event.key === 'Delete' || event.key === 'Backspace') &&
+      !/^(INPUT|SELECT|TEXTAREA)$/.test(event.target.tagName) &&
+      state.selection && !$('#delete-element').hidden) {
+    $('#delete-element').click();
+  }
+});
 
 listenForm('element', () => {
   const item = floor();
@@ -621,10 +654,7 @@ function occupied() {
   return building.router || building.positions.length || building.floors.some(item => item.background || item.walls.length || item.points.length);
 }
 
-$('#example').addEventListener('change', async event => {
-  const key = event.currentTarget.value;
-  event.currentTarget.value = '';
-  if (!key) return;
+async function loadExample(key) {
   const request = ++exampleRequest;
   if (occupied() && !window.confirm('¿Cargar otro escenario? Se reemplazarán los elementos y las posiciones de la sesión.')) return;
   const build = example(key);
@@ -645,7 +675,28 @@ $('#example').addEventListener('change', async event => {
   state.building = build;
   selectFloor(0);
   if (key === 'one' || key === 'two') { setMode('router'); renderPlan(); }
+}
+
+const exampleMenu = $('#example-options');
+const exampleButton = $('#example-button');
+function closeExampleMenu() {
+  exampleMenu.hidden = true;
+  exampleButton.setAttribute('aria-expanded', 'false');
+}
+exampleButton.addEventListener('click', () => {
+  exampleMenu.hidden = !exampleMenu.hidden;
+  exampleButton.setAttribute('aria-expanded', String(!exampleMenu.hidden));
 });
+exampleMenu.addEventListener('click', event => {
+  const key = event.target.closest('[data-example]')?.dataset.example;
+  if (!key) return;
+  closeExampleMenu();
+  void loadExample(key);
+});
+document.addEventListener('pointerdown', event => {
+  if (!exampleMenu.hidden && !event.target.closest('.sample-picker')) closeExampleMenu();
+});
+document.addEventListener('keydown', event => { if (event.key === 'Escape') closeExampleMenu(); });
 
 setupFieldHelp();
 new ResizeObserver(() => paintMap(canvas, state)).observe(canvas);

@@ -48,6 +48,10 @@ async function save(name) {
   await field('positionName', 'save').fill(name);
   await button('Guardar posición').click();
 }
+async function pickExample(key, target = page) {
+  await button('Elige cómo empezar', target).click();
+  await target.locator(`[data-example="${key}"]`).click();
+}
 async function calibrate(width, height) {
   await tapPlan(.06, .06, width, height);
   await tapPlan(.94, .06, width, height);
@@ -96,7 +100,7 @@ try {
   await button('Ayuda sobre Intensidad de la señal').hover();
   await helpBubble.filter({ hasText: '−50 dBm es más fuerte que −70 dBm' }).waitFor();
 
-  await page.locator('#example').selectOption('blank');
+  await pickExample('blank');
   await field('width', 'dimensions').fill('10');
   await field('height', 'dimensions').fill('8');
   await button('Aplicar medidas').click();
@@ -148,7 +152,7 @@ try {
   await page.locator('#delete-element').click();
   await checkText('#editor-note', /0 muros/);
 
-  await page.locator('#example').selectOption('two');
+  await pickExample('two');
   await button('2,4 GHz').click();
   await place(2, 2);
   const otherFloor = page.getByRole('row').filter({ hasText: 'Dormitorio norte' });
@@ -169,7 +173,7 @@ try {
     await page.screenshot({ path: `${screenshotDirectory}/routeroptimal-desktop.png`, fullPage: true });
   }
 
-  await page.locator('#example').selectOption('blank');
+  await pickExample('blank');
   await field('count', 'building').selectOption('2');
   await button('Aplicar vivienda').click();
   await upload(dwgPath, /AC1021 · 5\.596 entidades recuperadas/);
@@ -210,7 +214,7 @@ try {
   await save('Pasillo');
   await checkText('#comparison .result-summary', /Pasillo deja su punto más débil con más señal/);
 
-  await page.locator('#example').selectOption('cad');
+  await pickExample('cad');
   await checkText('#import-status', /planta-baja.png/);
   await button('Piso 2').click();
   await checkText('#import-status', /planta-alta.png/);
