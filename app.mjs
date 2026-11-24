@@ -1,6 +1,6 @@
 import { BANDS, MATERIALS, EPSILON, estimate, comparePositions, calibratedDimensions, sameWall } from './model.mjs';
 import { newFloor, example } from './examples.mjs';
-import { canvasPoint, hitTest, paintMap } from './map.mjs';
+import { canvasPoint, hitTest, paintMap, signalColor } from './map.mjs';
 import { setupFieldHelp } from './field-help.mjs';
 
 const $ = selector => document.querySelector(selector);
@@ -21,6 +21,8 @@ const numberFormat = new Intl.NumberFormat('es-CL', { maximumFractionDigits: 2 }
 const f = value => numberFormat.format(value);
 const esc = str => String(str).replace(/[&<>"']/g, ch => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[ch]);
 const floorName = index => `Piso ${index + 1}`;
+// Punto de color con la misma escala que el mapa y su leyenda (−90 a −35 dBm).
+const dot = value => `<i class="sig" style="background:${signalColor(value)}"></i>`;
 const targetMarks = new WeakMap();
 let nextId = 0;
 let noticeTimer;
@@ -231,7 +233,7 @@ function renderResults() {
       if (!ready(building.floors[p.floor])) return `<tr>${name}<td colspan="3">Escala pendiente</td></tr>`;
       const result = estimate(router, p, building, band);
       return `<tr>${name}<td class="numeric">${f(result.d)} m</td><td>${referenceDetails(result, p, router)}</td>
-        <td class="numeric"><strong>${f(result.signal)}</strong></td></tr>`;
+        <td class="numeric">${dot(result.signal)}<strong>${f(result.signal)}</strong></td></tr>`;
     });
     output.innerHTML = `<div class="table-shell"><table aria-label="Resultados estimados por punto">
       <thead><tr><th scope="col">Punto</th><th scope="col">Distancia</th><th scope="col">Obstáculos y pérdidas</th><th scope="col">Señal (dBm)</th></tr></thead>
@@ -255,12 +257,18 @@ function renderComparison(targets) {
     else if (ties.length > 1) summary = `Empate en ${f(leader.minimum)} dBm · ${ties.map(r => esc(r.position.name)).join(', ')}.`;
     else summary = `${esc(leader.position.name)} deja su punto más débil con más señal · ${f(leader.minimum)} dBm en ${esc(targets[leader.worstIndex].name)}.`;
   }
-  const cols = targets.map(p => `<th scope="col">${esc(p.name)}<small> · P${p.floor + 1}</small></th>`).join('');
-  const rows = results.map(({ position: p, values, minimum }) => `<tr><td>${esc(p.name)}
+  const cols = targets.map(p => `<th scope="col">${esc(p.name)}<small>${floorName(p.floor)}</small></th>`).join('');
+  const cell = (value, strong = false) => `<td class="numeric">${usable ?
+    `${dot(value)}${strong ? `<strong>${f(value)}</strong>` : f(value)}` : '–'}</td>`;
+  const rows = results.map(result => {
+    const { position: p, values, minimum } = result;
+    const best = usable && saved.length > 1 && ties.includes(result);
+    return `<tr${best ? ' class="is-best"' : ''}><td>${esc(p.name)}
     <small>${floorName(p.floor)} · ${f(p.x)}, ${f(p.y)} m</small>
     <div class="position-actions"><button class="button" type="button" data-position-action="use" data-id="${p.id}">Usar</button>
     <button class="button danger" type="button" data-position-action="remove" data-id="${p.id}">Borrar</button></div></td>
-    <td class="numeric">${usable ? f(minimum) : '–'}</td>${targets.map((_, i) => `<td class="numeric">${usable ? f(values[i]) : '–'}</td>`).join('')}</tr>`);
+    ${cell(minimum, true)}${targets.map((_, i) => cell(values?.[i])).join('')}</tr>`;
+  });
   output.innerHTML = `<p class="result-summary">${summary}</p><div class="table-shell"><table aria-label="Matriz de señal estimada por posición y punto en dBm">
     <thead><tr><th scope="col">Posición</th><th scope="col">Señal más baja (dBm)</th>${cols}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
 }
@@ -631,7 +639,7 @@ listenForm('save', () => {
   building.positions.push({ ...router, id: `position-${ordinal}`, name });
   write('save', { positionName: '' });
   renderResults();
-  announce(`${name} guardada.`);
+  announce(`Posición «${name}» guardada.`);
 });
 $('#comparison').addEventListener('click', event => {
   const action = event.target.dataset.positionAction;
@@ -697,6 +705,28 @@ document.addEventListener('pointerdown', event => {
   if (!exampleMenu.hidden && !event.target.closest('.sample-picker')) closeExampleMenu();
 });
 document.addEventListener('keydown', event => { if (event.key === 'Escape') closeExampleMenu(); });
+
+// Tema claro / oscuro: se elige en la cabecera y se recuerda en este navegador.
+const themeMeta = document.querySelector('meta[name="theme-color"]');
+const systemDark = matchMedia('(prefers-color-scheme: dark)');
+function savedTheme() {
+  try { const value = localStorage.getItem('ros-theme'); return value === 'light' || value === 'dark' ? value : null; }
+  catch { return null; }
+}
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  themeMeta?.setAttribute('content', theme === 'dark' ? '#0c1117' : '#f2f4f7');
+  for (const button of $$('[data-theme-choice]')) button.setAttribute('aria-pressed', String(button.dataset.themeChoice === theme));
+  paintMap(canvas, state);
+}
+for (const button of $$('[data-theme-choice]')) {
+  button.addEventListener('click', () => {
+    try { localStorage.setItem('ros-theme', button.dataset.themeChoice); } catch { /* sin almacenamiento: solo esta sesión */ }
+    applyTheme(button.dataset.themeChoice);
+  });
+}
+systemDark.addEventListener('change', event => { if (!savedTheme()) applyTheme(event.matches ? 'dark' : 'light'); });
+applyTheme(document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light');
 
 setupFieldHelp();
 new ResizeObserver(() => paintMap(canvas, state)).observe(canvas);

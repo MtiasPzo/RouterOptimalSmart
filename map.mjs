@@ -51,6 +51,29 @@ function color(value, opacity) {
   return `rgba(${rgb.join(',')},${opacity})`;
 }
 
+export function signalColor(value) { return color(value, 1); }
+
+// Planos importados (PNG o DWG) traen su propio fondo oscuro: sobre ellos se usa siempre esta paleta.
+const ON_IMAGE = {
+  sheet: '#202b38', wall: '#d0e2ed', point: '#e2eef6', pointLine: '#132538',
+  labelBg: '#142331', labelFg: '#f3fbff', labelLine: '#35506a', select: '#ffc797',
+  routerFill: '#172a47', routerLine: '#8ab5ff', start: '#8ab5ff', grid: '#2a4056'
+};
+
+// Lee los colores del tema activo desde las variables CSS (--cv-*) definidas en styles.css.
+function theme(canvas, onImage) {
+  const css = getComputedStyle(canvas);
+  const v = (name, fallback) => css.getPropertyValue(name).trim() || fallback;
+  const own = {
+    sheet: v('--cv-sheet', '#17212c'), grid: v('--cv-grid', '#243241'), wall: v('--cv-wall', '#cfe0ee'),
+    point: v('--cv-point', '#e6f0f8'), pointLine: v('--cv-point-line', '#0c1117'),
+    labelBg: v('--cv-label-bg', '#0e141b'), labelFg: v('--cv-label-fg', '#f1f6fb'), labelLine: v('--cv-label-line', '#38485c'),
+    select: v('--cv-select', '#ffb25e'), routerFill: v('--cv-router-fill', '#172a47'),
+    routerLine: v('--cv-router-line', '#8ab5ff'), start: v('--cv-start', '#8ab5ff')
+  };
+  return { ...(onImage ? ON_IMAGE : own), axis: v('--cv-axis', '#94a3b5'), frame: v('--cv-frame', '#5d7288') };
+}
+
 function line(ctx, a, b, paint, width) {
   ctx.strokeStyle = paint;
   ctx.lineWidth = width;
@@ -60,16 +83,16 @@ function line(ctx, a, b, paint, width) {
   ctx.stroke();
 }
 
-function paintGrid(ctx, view, dividedX, dividedY, floor) {
+function paintGrid(ctx, view, dividedX, dividedY, floor, paint) {
   const { left, top, w, h } = view;
   const step = Math.max(1, Math.ceil(Math.max(floor.width, floor.height) / 20));
   for (let x = step; x < floor.width; x += step) {
     const pos = left + x * dividedX;
-    line(ctx, {x: pos, y: top}, {x: pos, y: top + h}, '#2a4056', 1);
+    line(ctx, {x: pos, y: top}, {x: pos, y: top + h}, paint, 1);
   }
   for (let y = step; y < floor.height; y += step) {
     const pos = top + y * dividedY;
-    line(ctx, {x: left, y: pos}, {x: left + w, y: pos}, '#2a4056', 1);
+    line(ctx, {x: left, y: pos}, {x: left + w, y: pos}, paint, 1);
   }
 }
 
@@ -112,15 +135,21 @@ function circle(ctx, x, y, radius, fill, stroke) {
   ctx.stroke();
 }
 
-function label(ctx, x, y, text, maxX) {
-  ctx.font = '600 11px system-ui, sans-serif';
-  const width = ctx.measureText(text).width + 12;
+function label(ctx, x, y, text, maxX, t) {
+  ctx.font = '600 11px "Segoe UI", system-ui, sans-serif';
+  const width = ctx.measureText(text).width + 14;
   const left = x + width <= maxX ? x : Math.max(3, maxX - width);
-  ctx.fillStyle = '#142331';
-  ctx.fillRect(left, y - 9, width, 19);
-  ctx.fillStyle = '#f3fbff';
+  ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(left, y - 10, width, 20, 5); else ctx.rect(left, y - 10, width, 20);
+  ctx.fillStyle = t.labelBg;
+  ctx.fill();
+  ctx.strokeStyle = t.labelLine;
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.fillStyle = t.labelFg;
   ctx.textBaseline = 'middle';
-  ctx.fillText(text, left + 6, y);
+  ctx.textAlign = 'left';
+  ctx.fillText(text, left + 7, y + .5);
 }
 
 export function paintMap(canvas, state) {
@@ -142,23 +171,26 @@ export function paintMap(canvas, state) {
   const markPos = p => ({ x: left + p.x * w, y: top + p.y * h });
   const ready = !background || background.calibrated;
   const possibleRouter = building.floors[building.router?.floor];
-  const wallPaint = '#d0e2ed';
-  ctx.fillStyle = background ? '#202b38' : '#192c3f';
+  const t = theme(canvas, Boolean(background));
+  ctx.fillStyle = t.sheet;
   ctx.fillRect(left, top, w, h);
   if (background) {
     const c = background.crop;
     ctx.drawImage(background.image, c.x, c.y, c.width, c.height, left, top, w, h);
   }
-  if (ready && heat && building.router && (!possibleRouter.background || possibleRouter.background.calibrated)) {
-    drawHeat(canvas, view, building, activeFloor, band, Boolean(background));
+  const heatDrawn = ready && heat && building.router && (!possibleRouter.background || possibleRouter.background.calibrated);
+  if (heatDrawn) drawHeat(canvas, view, building, activeFloor, band, Boolean(background));
+  if (!background) {
+    ctx.globalAlpha = heatDrawn ? .4 : 1; // la cuadrícula no debe competir con el color de la señal
+    paintGrid(ctx, view, unitX, unitY, floor, t.grid);
+    ctx.globalAlpha = 1;
   }
-  if (!background) paintGrid(ctx, view, unitX, unitY, floor);
-  ctx.strokeStyle = '#89aabc';
+  ctx.strokeStyle = t.frame;
   ctx.lineWidth = 1;
-  ctx.strokeRect(left, top, w, h);
+  ctx.strokeRect(left + .5, top + .5, w - 1, h - 1);
   if (ready) {
-    ctx.font = '11px monospace';
-    ctx.fillStyle = '#b1c5d7';
+    ctx.font = '500 11px "Segoe UI", system-ui, sans-serif';
+    ctx.fillStyle = t.axis;
     ctx.textBaseline = 'middle';
     ctx.textAlign = 'center';
     ctx.fillText(`${locale.format(floor.width)} m`, left + w / 2, top - 12);
@@ -174,35 +206,38 @@ export function paintMap(canvas, state) {
     for (const wall of floor.walls) {
       const a = pos(wall.a), b = pos(wall.b);
       const selected = selection?.id === wall.id;
-      line(ctx, a, b, selected ? '#ffc797' : wallPaint,
+      line(ctx, a, b, selected ? t.select : t.wall,
         Math.max(selected ? 4 : 2, Math.min(9, wall.thickness * Math.min(unitX, unitY))));
     }
     if (wallStart) {
       const p = pos(wallStart);
-      circle(ctx, p.x, p.y, 5, '#71e4d2', '#0e2930');
+      circle(ctx, p.x, p.y, 5, t.start, t.pointLine);
     }
     if (draft?.kind === 'wall' && draft.a && draft.b) {
       ctx.setLineDash([5, 4]);
-      line(ctx, pos(draft.a), pos(draft.b), '#ffc797', 3);
+      line(ctx, pos(draft.a), pos(draft.b), t.select, 3);
       ctx.setLineDash([]);
     }
     for (const point of floor.points) {
       const p = pos(point);
-      circle(ctx, p.x, p.y, 5, selection?.id === point.id ? '#ffc797' : '#e2eef6', '#132538');
-      label(ctx, p.x + 8, p.y, point.name, width - 4);
+      circle(ctx, p.x, p.y, selection?.id === point.id ? 6 : 5, selection?.id === point.id ? t.select : t.point, t.pointLine);
+      label(ctx, p.x + 9, p.y, point.name, width - 4, t);
     }
     if (building.router?.floor === activeFloor) {
       const p = pos(building.router);
-      circle(ctx, p.x, p.y, 10, '#143739', '#8bf3e2');
-      circle(ctx, p.x, p.y, 3, '#8bf3e2', '#8bf3e2');
-      label(ctx, p.x + 13, p.y - 13, 'Router', width - 4);
+      ctx.globalAlpha = .2;
+      circle(ctx, p.x, p.y, 17, t.routerLine, t.routerLine);
+      ctx.globalAlpha = 1;
+      circle(ctx, p.x, p.y, 10, t.routerFill, t.routerLine);
+      circle(ctx, p.x, p.y, 3, t.routerLine, t.routerLine);
+      label(ctx, p.x + 15, p.y - 15, 'Router', width - 4, t);
     }
   }
   if (marks.length && ['calibration', 'crop'].includes(mode)) {
     const a = markPos(marks[0]), b = marks[1] && markPos(marks[1]);
-    if (b) line(ctx, a, b, '#ffbe86', 2);
-    circle(ctx, a.x, a.y, 5, '#ffbe86', '#20180d');
-    if (b) circle(ctx, b.x, b.y, 5, '#ffbe86', '#20180d');
+    if (b) line(ctx, a, b, t.select, 2);
+    circle(ctx, a.x, a.y, 5, t.select, t.pointLine);
+    if (b) circle(ctx, b.x, b.y, 5, t.select, t.pointLine);
   }
 }
 

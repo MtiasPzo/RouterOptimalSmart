@@ -3,10 +3,22 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="dark">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f2f4f7">
   <meta name="description" content="Prototipo académico para estimar y comparar la señal Wi-Fi en una vivienda.">
   <title>RouterOptimalSmart · Cobertura Wi-Fi</title>
-  <link rel="icon" href="data:,">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%231d5fd1'/%3E%3Cpath d='M7 14.5a13 13 0 0 1 18 0M10.5 18.5a8 8 0 0 1 11 0' fill='none' stroke='white' stroke-width='2.4' stroke-linecap='round'/%3E%3Ccircle cx='16' cy='23' r='2.2' fill='white'/%3E%3C/svg%3E">
+  <script>
+    /* Aplica el tema antes de pintar la página para evitar un destello. */
+    (function () {
+      var theme;
+      try { theme = localStorage.getItem('ros-theme'); } catch (e) {}
+      if (theme !== 'light' && theme !== 'dark') theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      document.documentElement.dataset.theme = theme;
+      var meta = document.querySelector('meta[name="theme-color"]');
+      if (meta) meta.content = theme === 'dark' ? '#0c1117' : '#f2f4f7';
+    })();
+  </script>
   <link rel="stylesheet" href="./styles.css">
   <script type="module" src="./app.mjs"></script>
 </head>
@@ -15,7 +27,13 @@
   <header class="site-header">
     <div class="wrap header-inner">
       <span class="brand"><span class="brand-mark" aria-hidden="true"><i></i></span><span>RouterOptimal<span>Smart</span></span></span>
-      <nav aria-label="Navegación principal"><a href="#resultados">Resultados</a><a href="#modelo">Modelo matemático</a></nav>
+      <div class="header-actions">
+        <nav aria-label="Navegación principal"><a href="#resultados">Resultados</a><a href="#modelo">Modelo matemático</a></nav>
+        <div class="theme-switch" role="group" aria-label="Tema de color">
+          <button type="button" data-theme-choice="light" aria-pressed="false" aria-label="Tema claro" title="Tema claro"><span aria-hidden="true"></span></button>
+          <button type="button" data-theme-choice="dark" aria-pressed="false" aria-label="Tema oscuro" title="Tema oscuro"><span aria-hidden="true"></span></button>
+        </div>
+      </div>
     </div>
   </header>
   <main class="wrap" id="main">
@@ -36,11 +54,13 @@
             <button type="button" data-floor="0">Piso 1</button><button type="button" data-floor="1">Piso 2</button>
           </div>
         </header>
-        <div class="map-toolbar" aria-label="Herramientas del plano">
+        <div class="map-toolbar" role="toolbar" aria-label="Herramientas del plano">
+          <div class="tool-group">
           <button type="button" class="tool" data-mode="select">Seleccionar</button>
           <button type="button" class="tool" data-mode="wall">Dibujar muro</button>
           <button type="button" class="tool" data-mode="point">Marcar punto</button>
           <button type="button" class="tool" data-mode="router">Mover router</button>
+          </div>
           <label for="heat" class="heat-toggle"><input type="checkbox" id="heat" checked data-help="Colorea el plano según la fuerza estimada del Wi-Fi. Los tonos amarillos muestran más señal y los morados, menos."> Colorear por señal</label>
         </div>
         <figure class="map-stage">

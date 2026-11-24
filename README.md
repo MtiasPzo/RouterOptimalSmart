@@ -15,6 +15,10 @@ Abre [http://127.0.0.1:8000](http://127.0.0.1:8000) en el navegador. La instalac
 
 Para abrir la web en el **celular**, conecta ambos dispositivos a la misma red local y arranca con `npm start -- --lan`. En Windows, ejecuta `ipconfig`, busca la dirección IPv4 del adaptador conectado y abre `http://DIRECCIÓN_IPV4:8000` en el celular. Si Windows pide permiso de firewall, habilita Node.js para la red privada. El modo normal escucha solo en este computador. Las posiciones se guardan durante la sesión de la página y se reinician al recargar.
 
+## Tema claro y oscuro
+
+El selector con el sol y la luna, arriba a la derecha, cambia entre tema claro y oscuro. La primera vez se usa el tema de tu sistema operativo; después se recuerda tu elección en ese navegador. Los colores viven como variables CSS al inicio de `styles.css` (`:root` para el claro y `:root[data-theme="dark"]` para el oscuro). Las variables `--cv-*` las lee también el plano dibujado en el lienzo. Los planos importados (DWG o imagen) conservan su fondo oscuro en ambos temas, porque el dibujo trae sus propios colores.
+
 ## Recorrido de uso
 
 Cada campo tiene un botón **?**. Pasa el mouse por encima, llega con el teclado usando Tab o toca el botón en el celular para ver qué significa y cómo completarlo.
