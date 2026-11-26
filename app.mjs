@@ -163,11 +163,10 @@ function renderControls() {
   const background = item.background;
   const band = BANDS[state.band];
   const bands = state.building.bands[state.band];
-  const countField = field('building', 'count');
-  countField.replaceChildren(...Array.from({ length: state.building.count + 1 }, (_, index) =>
-    option(String(index + 1), `${index + 1} ${index === 0 ? 'piso' : 'pisos'}`)));
-  write('building', { count: state.building.count, floorHeight: state.building.floorHeight });
+  $('#floor-count').textContent = `${state.building.count} ${state.building.count === 1 ? 'piso' : 'pisos'}`;
+  write('building', { floorHeight: state.building.floorHeight });
   field('building', 'floorHeight').disabled = state.building.count === 1;
+  forms.building.querySelector('button[type="submit"]').disabled = state.building.count === 1;
   write('dimensions', { width: item.width, height: item.height });
   write('band', bands);
   const tabs = $('#floor-tabs');
@@ -526,20 +525,11 @@ $('#outline-remove').addEventListener('click', () => {
   announce('Contorno exterior quitado.');
 });
 
-field('building', 'count').addEventListener('change', () => {
-  field('building', 'floorHeight').disabled = field('building', 'count').value === '1';
-});
 listenForm('building', () => {
-  const count = Number(field('building', 'count').value);
   const building = state.building;
-  if (!Number.isSafeInteger(count) || count < 1) throw new Error('El número de pisos debe ser un entero positivo.');
-  const floorHeight = count > 1 ? readNumber('building', 'floorHeight', 'La altura', 0.01) : building.floorHeight;
-  if (building.router?.floor >= count) throw new Error(`Mueve el router a uno de los primeros ${count} pisos antes de reducir la vivienda.`);
-  ensureFloors(count);
-  building.count = count;
+  const floorHeight = building.count > 1 ? readNumber('building', 'floorHeight', 'La altura', 0.01) : building.floorHeight;
   building.floorHeight = floorHeight;
-  if (state.activeFloor >= count) selectFloor(0);
-  else render();
+  render();
   announce('Vivienda actualizada.');
 });
 

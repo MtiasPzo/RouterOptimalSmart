@@ -20,7 +20,8 @@ const segment = (id, material, thickness, x1, y1, x2, y2) => ({
 const point = (id, name, x, y, floor) => ({ id, name, x, y, floor });
 
 export function example(key) {
-  const floors = [newFloor(), newFloor()];
+  const floors = [newFloor()];
+  if (key === 'two' || key === 'cad') floors.push(newFloor());
   if (key === 'one' || key === 'two') {
     floors[0].walls = [
       segment('w1', 'ladrillo', 0.15, 4, 0, 4, 7),

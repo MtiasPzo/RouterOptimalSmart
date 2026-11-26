@@ -13,6 +13,13 @@ const context = (a = [], b = []) => ({ floorHeight: 12, bands: BANDS, floors: [{
 const close = (actual, expected, tolerance = 1e-8) =>
   assert.ok(Math.abs(actual - expected) <= tolerance, `${actual} ≠ ${expected}`);
 
+test('los ejemplos contienen exactamente los pisos que muestran', () => {
+  for (const key of ['one', 'two', 'cad', 'blank']) {
+    const building = example(key);
+    assert.equal(building.floors.length, building.count, key);
+  }
+});
+
 test('el ajuste de muros corrige trazos cercanos al eje y respeta diagonales intencionales', () => {
   const start = { x: 2, y: 2 };
   const axes = { horizontal: true, vertical: true };

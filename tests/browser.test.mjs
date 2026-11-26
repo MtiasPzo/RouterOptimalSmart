@@ -93,6 +93,11 @@ try {
     await new Promise(resolve => setTimeout(resolve, 250));
   }
   await page.goto(base);
+  assert.equal(await page.locator('#floor-count').textContent(), '1 piso');
+  assert.equal(await page.locator('#floor-tabs button').count(), 1);
+  assert.equal(await page.locator('#floor-tabs button').first().isVisible(), true);
+  assert.equal(await page.locator('#floor-tabs button').first().textContent(), 'Piso 1');
+  assert.equal(await button('Aplicar vivienda').isDisabled(), true);
   await checkText('#point-summary', /Coloca el router/);
   const helpBubble = page.locator('.field-help-bubble');
   assert.deepEqual(await page.locator('input, select').evaluateAll(fields => fields.filter(control => {
@@ -202,8 +207,10 @@ try {
   }
 
   await pickExample('blank');
-  await field('count', 'building').selectOption('2');
-  await button('Aplicar vivienda').click();
+  await page.locator('#add-floor').click();
+  assert.equal(await page.locator('#floor-count').textContent(), '2 pisos');
+  assert.equal(await button('Aplicar vivienda').isEnabled(), true);
+  await button('Piso 1').click();
   await upload(dwgPath, /AC1021 · 5\.596 entidades recuperadas/);
   const colorsRendered = await page.locator('#plan').evaluate(canvas => {
     const { width, height } = canvas;
@@ -281,7 +288,7 @@ try {
   outlinePage.on('dialog', dialog => dialog.accept());
   await outlinePage.goto(base);
   assert.equal(await outlinePage.locator('#delete-floor').isDisabled(), true);
-  await outlinePage.locator('#example').selectOption('blank');
+  await pickExample('blank', outlinePage);
   await button('Trazar contorno', outlinePage).click();
   for (const [x, y] of [[.1,.1],[.9,.1],[.9,.9],[.1,.9]]) {
     await tapPlan(x, y, 9, 14, outlinePage);
@@ -290,6 +297,7 @@ try {
   await checkText('#feedback', /Contorno exterior guardado/);
   await outlinePage.locator('#add-floor').click();
   await checkText('#plan-meta', /Piso 2/);
+  assert.equal(await outlinePage.locator('#floor-count').textContent(), '2 pisos');
   assert.equal(await outlinePage.locator('[data-floor="1"]').getAttribute('aria-pressed'), 'true');
   await outlinePage.setViewportSize({ width: 375, height: 812 });
   await button('Trazar contorno', outlinePage).click();
@@ -303,11 +311,13 @@ try {
   await button('Colocar router', outlinePage).click();
   await tapPlan(.5, .5, 9, 14, outlinePage);
   for (let number = 4; number <= 6; number++) await outlinePage.locator('#add-floor').click();
+  assert.equal(await outlinePage.locator('#floor-count').textContent(), '6 pisos');
   await checkText('#coverage-status', /no supera −90 dBm en Piso 6/);
   await button('Piso 5', outlinePage).click();
   assert.equal(await outlinePage.locator('#coverage-status').isVisible(), false);
   await outlinePage.locator('#delete-floor').click();
   await checkText('#plan-meta', /Piso 5/);
+  assert.equal(await outlinePage.locator('#floor-count').textContent(), '5 pisos');
   assert.equal(await outlinePage.locator('#add-floor').getAttribute('aria-label'), 'Agregar piso 6');
   assert.deepEqual(errors, []);
   console.log('Navegador verificado: ayudas con mouse, teclado y pantalla táctil, dibujo, edición, bandas, DWG, escala y comparación.');

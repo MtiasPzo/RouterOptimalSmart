@@ -134,7 +134,7 @@
           </div>
           <form id="building-form" novalidate>
             <div class="field-grid">
-              <div><label for="floor-count">Número de pisos</label><select id="floor-count" name="count" data-help="Usa el signo + junto a las pestañas del plano para añadir pisos. Aquí puedes elegir cuántos pisos quedan activos."><option value="1">1 piso</option><option value="2">2 pisos</option></select></div>
+              <div><label for="floor-count">Número de pisos</label><output id="floor-count" class="floor-count" aria-live="polite">1 piso</output></div>
               <div><label for="floor-height">Altura entre pisos (metros)</label><input id="floor-height" name="floorHeight" inputmode="decimal" type="number" step="any" value="2.7" data-help="Es la separación vertical entre cada par de pisos consecutivos. El modelo usa la misma altura para todos los niveles."></div>
             </div>
             <p class="field-note">Altura inicial de ejemplo de 2,7 m.</p>
