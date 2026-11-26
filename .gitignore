@@ -1,2 +1,22 @@
-node_modules/
+# Dependencias y resultados generados
+/node_modules/
+/graphify-out/
+/test-results/
+/playwright-report/
+*.log
+
+# Repositorio de herramientas independiente
+/dev-workspace/
+
+# Configuracion y planos locales que pueden contener datos privados
+.env
+.env.*
+!.env.example
+!.env.sample
+*.dwg
+*.dxf
+
+# Archivos del sistema y del editor
 .DS_Store
+Thumbs.db
+*.swp
