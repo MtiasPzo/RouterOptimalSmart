@@ -68,6 +68,29 @@ function color(value, opacity) {
   return `rgba(${rgb.join(',')},${opacity * Math.min(1, (value - DISPLAY_CUTOFF_DBM) / 9)})`;
 }
 
+export function signalColor(value) { return color(value, 1); }
+
+// Planos importados (PNG o DWG) traen su propio fondo oscuro: sobre ellos se usa siempre esta paleta.
+const ON_IMAGE = {
+  sheet: '#202b38', wall: '#d0e2ed', point: '#e2eef6', pointLine: '#132538',
+  labelBg: '#142331', labelFg: '#f3fbff', labelLine: '#35506a', select: '#ffc797',
+  routerFill: '#172a47', routerLine: '#8ab5ff', start: '#8ab5ff', grid: '#2a4056'
+};
+
+// Lee los colores del tema activo desde las variables CSS (--cv-*) definidas en styles.css.
+function theme(canvas, onImage) {
+  const css = getComputedStyle(canvas);
+  const v = (name, fallback) => css.getPropertyValue(name).trim() || fallback;
+  const own = {
+    sheet: v('--cv-sheet', '#17212c'), grid: v('--cv-grid', '#243241'), wall: v('--cv-wall', '#cfe0ee'),
+    point: v('--cv-point', '#e6f0f8'), pointLine: v('--cv-point-line', '#0c1117'),
+    labelBg: v('--cv-label-bg', '#0e141b'), labelFg: v('--cv-label-fg', '#f1f6fb'), labelLine: v('--cv-label-line', '#38485c'),
+    select: v('--cv-select', '#ffb25e'), routerFill: v('--cv-router-fill', '#172a47'),
+    routerLine: v('--cv-router-line', '#8ab5ff'), start: v('--cv-start', '#8ab5ff')
+  };
+  return { ...(onImage ? ON_IMAGE : own), axis: v('--cv-axis', '#94a3b5'), frame: v('--cv-frame', '#5d7288') };
+}
+
 function line(ctx, a, b, paint, width) {
   ctx.strokeStyle = paint;
   ctx.lineWidth = width;
@@ -77,16 +100,16 @@ function line(ctx, a, b, paint, width) {
   ctx.stroke();
 }
 
-function paintGrid(ctx, view, dividedX, dividedY, floor) {
+function paintGrid(ctx, view, dividedX, dividedY, floor, paint) {
   const { left, top, w, h } = view;
   const step = Math.max(1, Math.ceil(Math.max(floor.width, floor.height) / 20));
   for (let x = step; x < floor.width; x += step) {
     const pos = left + x * dividedX;
-    line(ctx, {x: pos, y: top}, {x: pos, y: top + h}, '#36516f', 1);
+    line(ctx, {x: pos, y: top}, {x: pos, y: top + h}, paint, 1);
   }
   for (let y = step; y < floor.height; y += step) {
     const pos = top + y * dividedY;
-    line(ctx, {x: left, y: pos}, {x: left + w, y: pos}, '#36516f', 1);
+    line(ctx, {x: left, y: pos}, {x: left + w, y: pos}, paint, 1);
   }
 }
 
@@ -140,15 +163,21 @@ function circle(ctx, x, y, radius, fill, stroke) {
   ctx.stroke();
 }
 
-function label(ctx, x, y, text, maxX) {
-  ctx.font = '600 11px system-ui, sans-serif';
-  const width = ctx.measureText(text).width + 12;
+function label(ctx, x, y, text, maxX, t) {
+  ctx.font = '600 11px "Segoe UI", system-ui, sans-serif';
+  const width = ctx.measureText(text).width + 14;
   const left = x + width <= maxX ? x : Math.max(3, maxX - width);
-  ctx.fillStyle = '#10223c';
-  ctx.fillRect(left, y - 9, width, 19);
-  ctx.fillStyle = '#f3fbff';
+  ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(left, y - 10, width, 20, 5); else ctx.rect(left, y - 10, width, 20);
+  ctx.fillStyle = t.labelBg;
+  ctx.fill();
+  ctx.strokeStyle = t.labelLine;
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.fillStyle = t.labelFg;
   ctx.textBaseline = 'middle';
-  ctx.fillText(text, left + 6, y);
+  ctx.textAlign = 'left';
+  ctx.fillText(text, left + 7, y + .5);
 }
 
 function outlinePath(ctx, vertices, pos) {
@@ -183,16 +212,14 @@ export function paintMap(canvas, state) {
   const markPos = p => ({ x: left + p.x * w, y: top + p.y * h });
   const ready = !background || background.calibrated;
   const possibleRouter = building.floors[building.router?.floor];
-  const wallPaint = '#e3ecf7';
-  ctx.fillStyle = '#0b192c';
+  const t = theme(canvas, Boolean(background));
+  ctx.fillStyle = t.sheet;
   ctx.fillRect(left, top, w, h);
   ctx.save();
   if (floor.outline) {
     outlinePath(ctx, floor.outline.vertices, pos);
     ctx.clip();
   }
-  ctx.fillStyle = background ? '#202b38' : '#142b49';
-  ctx.fillRect(left, top, w, h);
   if (background) {
     const c = background.crop;
     ctx.drawImage(background.image, c.x, c.y, c.width, c.height, left, top, w, h);
@@ -203,20 +230,24 @@ export function paintMap(canvas, state) {
   const coverage = ready && heat && building.router && pathReady &&
     (!possibleRouter.background || possibleRouter.background.calibrated)
     ? drawHeat(canvas, view, building, activeFloor, band, Boolean(background)) : null;
-  if (!background) paintGrid(ctx, view, unitX, unitY, floor);
+  if (!background) {
+    ctx.globalAlpha = coverage === null ? 1 : .4;
+    paintGrid(ctx, view, unitX, unitY, floor, t.grid);
+    ctx.globalAlpha = 1;
+  }
   ctx.restore();
-  ctx.strokeStyle = '#a1badd';
+  ctx.strokeStyle = t.frame;
   ctx.lineWidth = 1;
-  ctx.strokeRect(left, top, w, h);
+  ctx.strokeRect(left + .5, top + .5, w - 1, h - 1);
   if (floor.outline) {
     outlinePath(ctx, floor.outline.vertices, pos);
-    ctx.strokeStyle = '#e9c875';
+    ctx.strokeStyle = t.select;
     ctx.lineWidth = 3;
     ctx.stroke();
   }
   if (ready) {
-    ctx.font = '11px monospace';
-    ctx.fillStyle = '#c9d9ed';
+    ctx.font = '500 11px "Segoe UI", system-ui, sans-serif';
+    ctx.fillStyle = t.axis;
     ctx.textBaseline = 'middle';
     ctx.textAlign = 'center';
     ctx.fillText(`${locale.format(floor.width)} m`, left + w / 2, top - 12);
@@ -232,43 +263,46 @@ export function paintMap(canvas, state) {
     for (const wall of floor.walls) {
       const a = pos(wall.a), b = pos(wall.b);
       const selected = selection?.id === wall.id;
-      line(ctx, a, b, selected ? '#e9c875' : wallPaint,
+      line(ctx, a, b, selected ? t.select : t.wall,
         Math.max(selected ? 4 : 2, Math.min(9, wall.thickness * Math.min(unitX, unitY))));
     }
     if (wallStart) {
       const p = pos(wallStart);
-      circle(ctx, p.x, p.y, 5, '#9fc1ff', '#10223c');
+      circle(ctx, p.x, p.y, 5, t.start, t.pointLine);
     }
     if (wallPreview) {
       const a = pos(wallPreview.a), b = pos(wallPreview.b);
       ctx.setLineDash([8, 5]);
-      line(ctx, a, b, '#e9c875', 4);
+      line(ctx, a, b, t.select, 4);
       ctx.setLineDash([]);
-      circle(ctx, a.x, a.y, 5, '#e9c875', '#10223c');
-      circle(ctx, b.x, b.y, 5, '#e9c875', '#10223c');
+      circle(ctx, a.x, a.y, 5, t.select, t.pointLine);
+      circle(ctx, b.x, b.y, 5, t.select, t.pointLine);
     }
     if (draft?.kind === 'wall' && draft.a && draft.b) {
       ctx.setLineDash([5, 4]);
-      line(ctx, pos(draft.a), pos(draft.b), '#e9c875', 3);
+      line(ctx, pos(draft.a), pos(draft.b), t.select, 3);
       ctx.setLineDash([]);
     }
     for (const point of floor.points) {
       const p = pos(point);
-      circle(ctx, p.x, p.y, 5, selection?.id === point.id ? '#e9c875' : '#e2eef6', '#132538');
-      label(ctx, p.x + 8, p.y, point.name, width - 4);
+      circle(ctx, p.x, p.y, selection?.id === point.id ? 6 : 5, selection?.id === point.id ? t.select : t.point, t.pointLine);
+      label(ctx, p.x + 9, p.y, point.name, width - 4, t);
     }
     if (building.router?.floor === activeFloor) {
       const p = pos(building.router);
-      circle(ctx, p.x, p.y, 10, '#173458', '#a8c7f5');
-      circle(ctx, p.x, p.y, 3, '#a8c7f5', '#a8c7f5');
-      label(ctx, p.x + 13, p.y - 13, 'Router', width - 4);
+      ctx.globalAlpha = .2;
+      circle(ctx, p.x, p.y, 17, t.routerLine, t.routerLine);
+      ctx.globalAlpha = 1;
+      circle(ctx, p.x, p.y, 10, t.routerFill, t.routerLine);
+      circle(ctx, p.x, p.y, 3, t.routerLine, t.routerLine);
+      label(ctx, p.x + 15, p.y - 15, 'Router', width - 4, t);
     }
   }
   if (marks.length && ['calibration', 'crop'].includes(mode)) {
     const a = markPos(marks[0]), b = marks[1] && markPos(marks[1]);
-    if (b) line(ctx, a, b, '#e9c875', 2);
-    circle(ctx, a.x, a.y, 5, '#e9c875', '#20180d');
-    if (b) circle(ctx, b.x, b.y, 5, '#e9c875', '#20180d');
+    if (b) line(ctx, a, b, t.select, 2);
+    circle(ctx, a.x, a.y, 5, t.select, t.pointLine);
+    if (b) circle(ctx, b.x, b.y, 5, t.select, t.pointLine);
   }
   if (mode === 'outline' && outlineDraft?.length) {
     const vertices = outlineHover ? [...outlineDraft, outlineHover] : outlineDraft;

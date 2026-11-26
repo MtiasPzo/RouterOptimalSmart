@@ -1,7 +1,7 @@
 import { BANDS, MATERIALS, EPSILON, estimate, comparePositions, calibratedDimensions, sameWall,
   pointInOutline, segmentInOutline, validOutline } from './model.mjs';
 import { newFloor, example, removeFloor } from './examples.mjs';
-import { canvasPoint, hitTest, paintMap, snapWallEnd, viewport, DISPLAY_CUTOFF_DBM } from './map.mjs';
+import { canvasPoint, hitTest, paintMap, signalColor, snapWallEnd, viewport, DISPLAY_CUTOFF_DBM } from './map.mjs';
 import { setupFieldHelp } from './field-help.mjs';
 
 const $ = selector => document.querySelector(selector);
@@ -28,6 +28,8 @@ const numberFormat = new Intl.NumberFormat('es-CL', { maximumFractionDigits: 2 }
 const f = value => numberFormat.format(value);
 const esc = str => String(str).replace(/[&<>"']/g, ch => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[ch]);
 const floorName = index => `Piso ${index + 1}`;
+// Punto de color con la misma escala que el mapa y su leyenda (−90 a −35 dBm).
+const dot = value => `<i class="sig" style="background:${signalColor(value)}"></i>`;
 const targetMarks = new WeakMap();
 let nextId = 0;
 let noticeTimer;
@@ -102,6 +104,12 @@ function setMode(mode) {
   state.draft = null;
 }
 
+function pulse() {
+  canvas.classList.remove('recalc');
+  void canvas.offsetWidth;
+  canvas.classList.add('recalc');
+}
+
 function selectFloor(index) {
   state.activeFloor = index;
   state.selection = null;
@@ -111,6 +119,7 @@ function selectFloor(index) {
   const tabs = $('#floor-tabs');
   const selected = tabs.children[index];
   if (selected) tabs.scrollLeft = selected.offsetLeft - tabs.offsetLeft - (tabs.clientWidth - selected.clientWidth) / 2;
+  pulse();
 }
 
 function renderPlan() {
@@ -396,7 +405,7 @@ function renderResults() {
       if (!pathReady(building, router.floor, p.floor)) return `<tr>${name}<td colspan="3">Escala pendiente en el trayecto entre pisos</td></tr>`;
       const result = estimate(router, p, building, band);
       return `<tr>${name}<td class="numeric">${f(result.d)} m</td><td>${referenceDetails(result, p, router)}</td>
-        <td class="numeric"><strong>${f(result.signal)}</strong></td></tr>`;
+        <td class="numeric">${dot(result.signal)}<strong>${f(result.signal)}</strong></td></tr>`;
     });
     output.innerHTML = `<div class="table-shell"><table aria-label="Resultados estimados por punto">
       <thead><tr><th scope="col">Punto</th><th scope="col">Distancia</th><th scope="col">Obstáculos y pérdidas</th><th scope="col">Señal (dBm)</th></tr></thead>
@@ -421,12 +430,18 @@ function renderComparison(targets) {
     else if (ties.length > 1) summary = `Empate en ${f(leader.minimum)} dBm · ${ties.map(r => esc(r.position.name)).join(', ')}.`;
     else summary = `${esc(leader.position.name)} deja su punto más débil con más señal · ${f(leader.minimum)} dBm en ${esc(targets[leader.worstIndex].name)}.`;
   }
-  const cols = targets.map(p => `<th scope="col">${esc(p.name)}<small> · P${p.floor + 1}</small></th>`).join('');
-  const rows = results.map(({ position: p, values, minimum }) => `<tr><td>${esc(p.name)}
+  const cols = targets.map(p => `<th scope="col">${esc(p.name)}<small>${floorName(p.floor)}</small></th>`).join('');
+  const cell = (value, strong = false) => `<td class="numeric">${usable ?
+    `${dot(value)}${strong ? `<strong>${f(value)}</strong>` : f(value)}` : '–'}</td>`;
+  const rows = results.map(result => {
+    const { position: p, values, minimum } = result;
+    const best = usable && saved.length > 1 && ties.includes(result);
+    return `<tr${best ? ' class="is-best"' : ''}><td>${esc(p.name)}
     <small>${floorName(p.floor)} · ${f(p.x)}, ${f(p.y)} m</small>
     <div class="position-actions"><button class="button" type="button" data-position-action="use" data-id="${p.id}">Usar</button>
     <button class="button danger" type="button" data-position-action="remove" data-id="${p.id}">Borrar</button></div></td>
-    <td class="numeric">${usable ? f(minimum) : '–'}</td>${targets.map((_, i) => `<td class="numeric">${usable ? f(values[i]) : '–'}</td>`).join('')}</tr>`);
+    ${cell(minimum, true)}${targets.map((_, i) => cell(values?.[i])).join('')}</tr>`;
+  });
   output.innerHTML = `<p class="result-summary">${summary}</p><div class="table-shell"><table aria-label="Matriz de señal estimada por posición y punto en dBm">
     <thead><tr><th scope="col">Posición</th><th scope="col">Señal más baja (dBm)</th>${cols}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
 }
@@ -577,6 +592,7 @@ $('#band-tabs').addEventListener('click', event => {
   renderControls();
   renderPlan();
   renderResults();
+  pulse();
 });
 for (const button of $$('.tool[data-mode]')) button.addEventListener('click', () => {
   setMode(button.dataset.mode);
@@ -593,7 +609,7 @@ for (const button of $$('.tool[data-mode]')) button.addEventListener('click', ()
   renderOutlinePanel();
   renderPlan();
 });
-$('#heat').addEventListener('change', event => { state.heat = event.target.checked; renderPlan(); });
+$('#heat').addEventListener('change', event => { state.heat = event.target.checked; renderPlan(); pulse(); });
 
 $('#route-draw').addEventListener('click', () => {
   const item = floor();
@@ -759,6 +775,7 @@ function placeRouter(p) {
   state.building.router = { ...p, floor: state.activeFloor };
   state.selection = { kind: 'router', id: 'router' };
   render();
+  pulse();
 }
 
 canvas.addEventListener('pointerdown', event => {
@@ -840,23 +857,23 @@ canvas.addEventListener('click', event => {
       announce('El muro necesita dos extremos distintos.', true);
       return;
     }
-    const b = snappedWallEnd(state.wallStart, p);
-    if (!wallInsideFloor(state.wallStart, b, floor())) { announce('El muro debe quedar dentro del contorno.', true); return; }
-    state.draft = { kind: 'wall', a: state.wallStart, b };
+    const a = state.wallStart;
     state.wallStart = null;
-    state.selection = { kind: 'wall', id: 'new-wall' };
-    renderEditor();
-    renderPlan();
+    try { addDrawnWall(a, snappedWallEnd(a, p)); }
+    catch (error) { renderPlan(); announce(error.message, true); }
     return;
   }
   if (state.mode === 'point') {
     if (!insideFloor(p, floor())) { announce('Marca el punto dentro del contorno.', true); return; }
+    const name = window.prompt('Nombre del punto de interés:');
+    if (name === null) return;
     const id = `point-${++nextId}`;
     let index = floor().points.length + 1;
-    while (floor().points.some(p => p.name === `Punto ${index}`)) index++;
-    floor().points.push({ ...p, id, name: `Punto ${index}`, floor: state.activeFloor });
+    while (floor().points.some(item => item.name === `Punto ${index}`)) index++;
+    floor().points.push({ ...p, id, name: name.trim() || `Punto ${index}`, floor: state.activeFloor });
     state.selection = { kind: 'point', id };
     render();
+    pulse();
     return;
   }
   const router = state.building.router?.floor === state.activeFloor ? state.building.router : null;
@@ -888,6 +905,19 @@ $('#element-list').addEventListener('change', event => {
   renderPlan();
 });
 $('#edit-router').addEventListener('click', () => useSelection('router', 'router'));
+
+document.addEventListener('keydown', event => {
+  if (event.key !== 'Escape') return;
+  if (state.wallStart) { state.wallStart = null; renderPlan(); }
+  else if (state.draft) { state.draft = null; state.selection = null; renderEditor(); renderPlan(); }
+});
+document.addEventListener('keydown', event => {
+  if ((event.key === 'Delete' || event.key === 'Backspace') &&
+      !/^(INPUT|SELECT|TEXTAREA)$/.test(event.target.tagName) &&
+      state.selection && !$('#delete-element').hidden) {
+    $('#delete-element').click();
+  }
+});
 
 listenForm('element', () => {
   const item = floor();
@@ -953,7 +983,7 @@ listenForm('save', () => {
   building.positions.push({ ...router, id: `position-${ordinal}`, name });
   write('save', { positionName: '' });
   renderResults();
-  announce(`${name} guardada.`);
+  announce(`Posición «${name}» guardada.`);
 });
 $('#comparison').addEventListener('click', event => {
   const action = event.target.dataset.positionAction;
@@ -976,10 +1006,7 @@ function occupied() {
   return building.router || building.positions.length || building.floors.some(item => item.background || item.outline || item.walls.length || item.points.length);
 }
 
-$('#example').addEventListener('change', async event => {
-  const key = event.currentTarget.value;
-  event.currentTarget.value = '';
-  if (!key) return;
+async function loadExample(key) {
   const request = ++exampleRequest;
   if (occupied() && !window.confirm('¿Cargar otro escenario? Se reemplazarán los elementos y las posiciones de la sesión.')) return;
   const build = example(key);
@@ -1000,7 +1027,50 @@ $('#example').addEventListener('change', async event => {
   state.building = build;
   selectFloor(0);
   if (key === 'one' || key === 'two') { setMode('router'); renderPlan(); }
+}
+
+const exampleMenu = $('#example-options');
+const exampleButton = $('#example-button');
+function closeExampleMenu() {
+  exampleMenu.hidden = true;
+  exampleButton.setAttribute('aria-expanded', 'false');
+}
+exampleButton.addEventListener('click', () => {
+  exampleMenu.hidden = !exampleMenu.hidden;
+  exampleButton.setAttribute('aria-expanded', String(!exampleMenu.hidden));
 });
+exampleMenu.addEventListener('click', event => {
+  const key = event.target.closest('[data-example]')?.dataset.example;
+  if (!key) return;
+  closeExampleMenu();
+  void loadExample(key);
+});
+document.addEventListener('pointerdown', event => {
+  if (!exampleMenu.hidden && !event.target.closest('.sample-picker')) closeExampleMenu();
+});
+document.addEventListener('keydown', event => { if (event.key === 'Escape') closeExampleMenu(); });
+
+// Tema claro / oscuro: se elige en la cabecera y se recuerda en este navegador.
+const themeMeta = document.querySelector('meta[name="theme-color"]');
+const systemDark = matchMedia('(prefers-color-scheme: dark)');
+function savedTheme() {
+  try { const value = localStorage.getItem('ros-theme'); return value === 'light' || value === 'dark' ? value : null; }
+  catch { return null; }
+}
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  themeMeta?.setAttribute('content', theme === 'dark' ? '#091426' : '#f2f4f7');
+  for (const button of $$('[data-theme-choice]')) button.setAttribute('aria-pressed', String(button.dataset.themeChoice === theme));
+  paintMap(canvas, state);
+}
+for (const button of $$('[data-theme-choice]')) {
+  button.addEventListener('click', () => {
+    try { localStorage.setItem('ros-theme', button.dataset.themeChoice); } catch { /* sin almacenamiento: solo esta sesión */ }
+    applyTheme(button.dataset.themeChoice);
+  });
+}
+systemDark.addEventListener('change', event => { if (!savedTheme()) applyTheme(event.matches ? 'dark' : 'light'); });
+applyTheme(document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light');
 
 setupFieldHelp();
 new ResizeObserver(() => paintMap(canvas, state)).observe(canvas);
