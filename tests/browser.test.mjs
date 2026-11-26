@@ -38,6 +38,19 @@ async function tapPlan(x, y, width, height, target = page, touch = false) {
   const cy = rect.y + (rect.height - h) / 2 + y * h;
   await (touch ? target.touchscreen.tap(cx, cy) : target.mouse.click(cx, cy));
 }
+async function dragPlan(x1, y1, x2, y2, width, height, target = page) {
+  const canvas = target.locator('#plan');
+  await canvas.scrollIntoViewIfNeeded();
+  const rect = await canvas.boundingBox();
+  const scale = Math.min((rect.width - 60) / width, (rect.height - 58) / height);
+  const w = width * scale, h = height * scale;
+  const x = value => rect.x + (rect.width - w) / 2 + value * w;
+  const y = value => rect.y + (rect.height - h) / 2 + value * h;
+  await target.mouse.move(x(x1), y(y1));
+  await target.mouse.down();
+  await target.mouse.move(x(x2), y(y2), { steps: 8 });
+  await target.mouse.up();
+}
 async function place(x, y) {
   await button('Ingresar posición del router').click();
   await field('x').fill(String(x));
@@ -101,6 +114,21 @@ try {
   await field('height', 'dimensions').fill('8');
   await button('Aplicar medidas').click();
   await checkText('#plan-meta', /10 × 8 m/);
+
+  await button('Dibujar muro').click();
+  await page.locator('#quick-material').selectOption('tabique');
+  await page.locator('#quick-thickness').fill('12');
+  await dragPlan(.2, .2, .8, .21, 10, 8);
+  await checkText('#editor-note', /1 muro/);
+  await button('Seleccionar').click();
+  await tapPlan(.5, .2, 10, 8);
+  assert.equal(await page.locator('#quick-y').inputValue(), await page.locator('#quick-y2').inputValue());
+  await page.locator('#quick-wall-details summary').click();
+  await page.locator('#quick-loss-24').fill('7');
+  await button('Aplicar al muro').click();
+  assert.equal(await page.locator('#quick-loss-24').inputValue(), '7');
+  await page.locator('#quick-wall-delete').click();
+  await checkText('#editor-note', /0 muros/);
 
   await button('Dibujar muro').click();
   await tapPlan(.5, .1, 10, 8);
@@ -221,7 +249,7 @@ try {
   const mobileHelp = button('Ayuda sobre Colorear por señal', mobile);
   const mobileBubble = mobile.locator('.field-help-bubble');
   await mobileHelp.tap();
-  await mobileBubble.filter({ hasText: 'tonos amarillos' }).waitFor();
+  await mobileBubble.filter({ hasText: 'dorado indica mejor cobertura' }).waitFor();
   const bounds = await mobileBubble.boundingBox();
   assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 375);
   assert.ok(await mobile.locator('#heat').isChecked());
@@ -230,6 +258,11 @@ try {
 
   await tapPlan(.25, .32, 9, 14, mobile, true);
   await mobile.locator('#point-results').getByRole('row').filter({ hasText: 'Escritorio' }).waitFor();
+  await button('Dibujar muro', mobile).click();
+  const mobileCanvas = await mobile.locator('#plan').boundingBox();
+  const mobilePanel = await mobile.locator('#quick-wall-form').boundingBox();
+  assert.ok(mobilePanel.y >= mobileCanvas.y + mobileCanvas.height, 'El panel móvil debe quedar debajo del plano.');
+  await button('Mover router', mobile).click();
   assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth), 375);
   if (screenshotDirectory) {
     await mobile.evaluate(() => window.scrollTo(0, 0));
@@ -238,6 +271,40 @@ try {
   await mobile.setViewportSize({ width: 812, height: 375 });
   await tapPlan(.75, .64, 9, 14, mobile, true);
   assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth), 812);
+
+  const outlinePage = await browser.newPage({ viewport: { width: 1180, height: 900 } });
+  outlinePage.on('pageerror', error => errors.push(error.message));
+  outlinePage.on('dialog', dialog => dialog.accept());
+  await outlinePage.goto(base);
+  assert.equal(await outlinePage.locator('#delete-floor').isDisabled(), true);
+  await outlinePage.locator('#example').selectOption('blank');
+  await button('Trazar contorno', outlinePage).click();
+  for (const [x, y] of [[.1,.1],[.9,.1],[.9,.9],[.1,.9]]) {
+    await tapPlan(x, y, 9, 14, outlinePage);
+  }
+  await button('Cerrar contorno', outlinePage).click();
+  await checkText('#feedback', /Contorno exterior guardado/);
+  await outlinePage.locator('#add-floor').click();
+  await checkText('#plan-meta', /Piso 2/);
+  assert.equal(await outlinePage.locator('[data-floor="1"]').getAttribute('aria-pressed'), 'true');
+  await outlinePage.setViewportSize({ width: 375, height: 812 });
+  await button('Trazar contorno', outlinePage).click();
+  const outlineCanvas = await outlinePage.locator('#plan').boundingBox();
+  const outlinePanel = await outlinePage.locator('#outline-panel').boundingBox();
+  assert.ok(outlinePanel.y >= outlineCanvas.y + outlineCanvas.height, 'El panel del contorno debe quedar bajo el plano en móvil.');
+  await outlinePage.locator('#add-floor').click();
+  await checkText('#plan-meta', /Piso 3/);
+  assert.equal(await outlinePage.locator('#add-floor').isVisible(), true);
+  await button('Piso 1', outlinePage).click();
+  await button('Colocar router', outlinePage).click();
+  await tapPlan(.5, .5, 9, 14, outlinePage);
+  for (let number = 4; number <= 6; number++) await outlinePage.locator('#add-floor').click();
+  await checkText('#coverage-status', /no supera −90 dBm en Piso 6/);
+  await button('Piso 5', outlinePage).click();
+  assert.equal(await outlinePage.locator('#coverage-status').isVisible(), false);
+  await outlinePage.locator('#delete-floor').click();
+  await checkText('#plan-meta', /Piso 5/);
+  assert.equal(await outlinePage.locator('#add-floor').getAttribute('aria-label'), 'Agregar piso 6');
   assert.deepEqual(errors, []);
   console.log('Navegador verificado: ayudas con mouse, teclado y pantalla táctil, dibujo, edición, bandas, DWG, escala y comparación.');
 } finally {

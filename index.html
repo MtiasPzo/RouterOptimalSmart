@@ -32,25 +32,70 @@
       <article class="card map-card">
         <header class="card-header map-header">
           <div><h2>Plano de la vivienda</h2><p id="plan-meta"></p></div>
-          <div class="segmented" id="floor-tabs" aria-label="Piso visible">
-            <button type="button" data-floor="0">Piso 1</button><button type="button" data-floor="1">Piso 2</button>
+          <div class="floor-switcher">
+            <div class="segmented" id="floor-tabs" aria-label="Piso visible"><button type="button" data-floor="0">Piso 1</button></div>
+            <button type="button" id="add-floor" aria-label="Agregar piso 2" title="Agregar piso 2">+</button>
+            <button type="button" id="delete-floor" aria-label="Eliminar piso visible" title="Eliminar piso visible" disabled>×</button>
           </div>
         </header>
         <div class="map-toolbar" aria-label="Herramientas del plano">
           <button type="button" class="tool" data-mode="select">Seleccionar</button>
           <button type="button" class="tool" data-mode="wall">Dibujar muro</button>
+          <button type="button" class="tool" data-mode="outline">Trazar contorno</button>
           <button type="button" class="tool" data-mode="point">Marcar punto</button>
           <button type="button" class="tool" data-mode="router">Mover router</button>
-          <label for="heat" class="heat-toggle"><input type="checkbox" id="heat" checked data-help="Colorea el plano según la fuerza estimada del Wi-Fi. Los tonos amarillos muestran más señal y los morados, menos."> Colorear por señal</label>
+          <label for="heat" class="heat-toggle"><input type="checkbox" id="heat" checked data-help="Colorea el plano según la fuerza estimada del Wi-Fi. El dorado indica mejor cobertura y el azul oscuro, peor cobertura."> Colorear por señal</label>
         </div>
         <figure class="map-stage">
           <canvas id="plan" aria-label="Plano interactivo. Los formularios permiten editar el plano mediante coordenadas." aria-describedby="map-hint"></canvas>
+          <form id="quick-wall-form" class="quick-wall" aria-label="Opciones de muros" hidden>
+            <div class="quick-wall-heading"><div><strong id="quick-wall-title">Muro manual</strong><span id="quick-wall-subtitle">Arrastra sobre el plano</span></div><button id="quick-wall-delete" type="button" aria-label="Eliminar muro seleccionado" title="Eliminar muro" hidden>×</button></div>
+            <div class="quick-wall-fields">
+              <div><label for="quick-material">Material</label><select id="quick-material" name="material"></select></div>
+              <div><label for="quick-thickness">Grosor · cm</label><input id="quick-thickness" name="thickness" type="number" inputmode="decimal" min="0.01" max="10000" step="any" value="10"></div>
+            </div>
+            <fieldset id="wall-snap-controls" class="snap-controls"><legend>Ajustar al eje</legend>
+              <label><input id="snap-horizontal" type="checkbox" checked> Horizontal</label>
+              <label><input id="snap-vertical" type="checkbox" checked> Vertical</label>
+            </fieldset>
+            <details id="quick-wall-details" hidden><summary>Señal y coordenadas exactas</summary>
+              <div class="quick-wall-fields">
+                <div><label for="quick-loss-24">Pérdida 2,4 GHz · dB/10 cm</label><input id="quick-loss-24" name="loss24" type="number" inputmode="decimal" min="0" max="1000" step="any"></div>
+                <div><label for="quick-loss-5">Pérdida 5 GHz · dB/10 cm</label><input id="quick-loss-5" name="loss5" type="number" inputmode="decimal" min="0" max="1000" step="any"></div>
+                <div><label for="quick-x">Inicio X · m</label><input id="quick-x" name="x" type="number" inputmode="decimal" step="any"></div>
+                <div><label for="quick-y">Inicio Y · m</label><input id="quick-y" name="y" type="number" inputmode="decimal" step="any"></div>
+                <div><label for="quick-x2">Final X · m</label><input id="quick-x2" name="x2" type="number" inputmode="decimal" step="any"></div>
+                <div><label for="quick-y2">Final Y · m</label><input id="quick-y2" name="y2" type="number" inputmode="decimal" step="any"></div>
+              </div>
+            </details>
+            <button id="quick-wall-edit" class="button small" type="button" hidden>Editar muro dibujado</button>
+            <button id="quick-wall-save" class="button small primary" type="submit" hidden>Aplicar al muro</button>
+          </form>
+          <div id="outline-panel" class="quick-wall outline-panel" hidden>
+            <div class="quick-wall-heading"><div><strong>Contorno exterior</strong><span id="outline-count">Marca las esquinas de la vivienda</span></div></div>
+            <p>Marca cada esquina sobre el plano. Toca la primera esquina para cerrar.</p>
+            <details><summary>Añadir esquina por coordenadas</summary><div class="quick-wall-fields">
+              <div><label for="outline-x">X · m</label><input id="outline-x" type="number" inputmode="decimal" min="0" step="any"></div>
+              <div><label for="outline-y">Y · m</label><input id="outline-y" type="number" inputmode="decimal" min="0" step="any"></div>
+            </div><button id="outline-add-point" type="button" class="button small">Añadir esquina</button></details>
+            <div class="quick-wall-fields">
+              <div><label for="outline-material">Material exterior</label><select id="outline-material"></select></div>
+              <div><label for="outline-thickness">Grosor · cm</label><input id="outline-thickness" type="number" inputmode="decimal" min="0.01" max="10000" step="any" value="15"></div>
+            </div>
+            <details><summary>Pérdidas del muro exterior</summary><div class="quick-wall-fields">
+              <div><label for="outline-loss-24">2,4 GHz · dB/10 cm</label><input id="outline-loss-24" type="number" inputmode="decimal" min="0" max="1000" step="any"></div>
+              <div><label for="outline-loss-5">5 GHz · dB/10 cm</label><input id="outline-loss-5" type="number" inputmode="decimal" min="0" max="1000" step="any"></div>
+            </div></details>
+            <div class="outline-actions"><button id="outline-undo" type="button" class="button small">Deshacer punto</button><button id="outline-close" type="button" class="button small primary">Cerrar contorno</button><button id="outline-remove" type="button" class="button small danger">Quitar contorno</button></div>
+          </div>
         </figure>
         <footer class="map-footer">
           <p id="map-hint" aria-live="polite"></p>
-          <div class="heat-legend" aria-label="Intensidad de la señal" data-help="dBm significa decibelios respecto a un milivatio y expresa la fuerza de la señal. Un valor mayor indica más señal. Por ejemplo, −50 dBm es más fuerte que −70 dBm.">
-            <span>−90</span><i></i><span>−35 dBm</span>
+          <p id="coverage-status" class="coverage-status" role="status" hidden></p>
+          <div class="heat-legend" aria-label="Cobertura estimada: azul oscuro, peor, menos 90 dBm; dorado, mejor, menos 35 dBm" data-help="dBm significa decibelios respecto a un milivatio. El azul oscuro indica peor cobertura y el dorado, mejor. Por ejemplo, −50 dBm es más fuerte que −70 dBm.">
+            <span><b>Peor · azul oscuro</b>−90 dBm</span><i aria-hidden="true"></i><span><b>Mejor · dorado</b>−35 dBm</span>
           </div>
+          <small class="coverage-note">Bajo −90 dBm, el mapa deja de colorear; los resultados conservan el valor estimado.</small>
         </footer>
       </article>
 
@@ -67,8 +112,8 @@
           </div>
           <form id="building-form" novalidate>
             <div class="field-grid">
-              <div><label for="floor-count">Número de pisos</label><select id="floor-count" name="count" data-help="Elige si quieres representar uno o dos pisos. Si eliges dos, podrás cambiar de piso con las pestañas encima del plano."><option value="1">1 piso</option><option value="2">2 pisos</option></select></div>
-              <div><label for="floor-height">Altura entre pisos (metros)</label><input id="floor-height" name="floorHeight" inputmode="decimal" type="number" step="any" value="2.7" data-help="Es la distancia vertical desde el suelo del primer piso hasta el suelo del segundo. Se usa para calcular la distancia cuando el router y el lugar están en pisos distintos."></div>
+              <div><label for="floor-count">Número de pisos</label><select id="floor-count" name="count" data-help="Usa el signo + junto a las pestañas del plano para añadir pisos. Aquí puedes elegir cuántos pisos quedan activos."><option value="1">1 piso</option><option value="2">2 pisos</option></select></div>
+              <div><label for="floor-height">Altura entre pisos (metros)</label><input id="floor-height" name="floorHeight" inputmode="decimal" type="number" step="any" value="2.7" data-help="Es la separación vertical entre cada par de pisos consecutivos. El modelo usa la misma altura para todos los niveles."></div>
             </div>
             <p class="field-note">Altura inicial de ejemplo de 2,7 m.</p>
             <button type="submit" class="button small">Aplicar vivienda</button>
@@ -111,7 +156,7 @@
                 <div><label for="router-power">Potencia del router</label><input id="router-power" name="eirp" inputmode="decimal" type="number" step="any" data-help="Indica cuánta potencia emite el router teniendo en cuenta su antena. En las especificaciones se llama potencia isotrópica radiada equivalente (EIRP o PIRE) y se expresa en dBm."></div>
                 <div><label for="receiver-gain">Aporte de la antena receptora</label><input id="receiver-gain" name="gain" inputmode="decimal" type="number" step="any" data-help="Es la ganancia de la antena del dispositivo que recibe el Wi-Fi. Se mide en dBi, que compara esa antena con una antena ideal que recibe por igual en todas direcciones. Si no conoces este valor, puedes dejar el 0 de ejemplo."></div>
                 <div><label for="distance-drop">Caída con la distancia</label><input id="distance-drop" name="exponent" inputmode="decimal" type="number" step="any" data-help="Determina qué tan rápido baja la señal cuando te alejas del router. En la fórmula se llama exponente n. Un número mayor hace que la señal baje más rápido."></div>
-                <div><label for="floor-loss">Pérdida entre pisos</label><input id="floor-loss" name="slab" inputmode="decimal" type="number" step="any" data-help="Indica cuánto se debilita la señal al atravesar el suelo que separa un piso de otro, también llamado losa. La pérdida se mide en decibelios (dB)."></div>
+                <div><label for="floor-loss">Pérdida por losa</label><input id="floor-loss" name="slab" inputmode="decimal" type="number" step="any" data-help="Indica cuánto se debilita la señal por cada losa atravesada. Si el router y el punto están separados por tres pisos, se cuentan tres losas. La pérdida se mide en dB."></div>
               </div>
               <p class="field-note">Son valores de ejemplo. Puedes dejarlos así para probar el simulador.</p>
               <button type="submit" class="button small">Aplicar parámetros</button>
@@ -179,11 +224,11 @@
             <p>Las diferencias son del punto respecto del router. X crece a la derecha, Y hacia abajo y Z hacia arriba. Δz es cero en el mismo piso y equivale a la separación entre pisos, con su signo, en el otro. La tabla muestra θ en grados. Una antena omnidireccional usa el ángulo solo para describir el trayecto.</p>
           </div>
           <div><h3>Referencia y pérdida</h3>
-            <p class="formula">L<sub>FSPL</sub>(f, d₀) = 20 log₁₀(4π f d₀ / c)<br>S<sub>b</sub>(d₀) = P<sub>EIRP,b</sub> + G<sub>receptor,b</sub> − L<sub>FSPL</sub><br>S<sub>b</sub>(d) = S<sub>b</sub>(d₀) − 10 n<sub>b</sub> log₁₀(max(d,d₀)/d₀) − ΣL<sub>muro,b</sub> − L<sub>losa,b</sub></p>
+            <p class="formula">L<sub>FSPL</sub>(f, d₀) = 20 log₁₀(4π f d₀ / c)<br>S<sub>b</sub>(d₀) = P<sub>EIRP,b</sub> + G<sub>receptor,b</sub> − L<sub>FSPL</sub><br>S<sub>b</sub>(d) = S<sub>b</sub>(d₀) − 10 n<sub>b</sub> log₁₀(max(d,d₀)/d₀) − ΣL<sub>muro,b</sub> − N<sub>losas</sub>L<sub>losa,b</sub></p>
             <p>d₀ = 1 m, f es 2,4 o 5 GHz en Hz y c = 299 792 458 m/s. P es potencia radiada equivalente en dBm, G es ganancia de recepción en dBi y n es un exponente sin unidad. El resultado S está en dBm y las pérdidas se restan en dB. La frecuencia se aplica una vez, en la referencia.</p>
           </div>
           <div><h3>Obstáculos y matriz de resultados</h3>
-            <p>Los muros cuentan por cruce transversal entre segmentos. La pérdida de cada muro equivale al valor editable por 10 cm multiplicado por su grosor en unidades de 10 cm. Entre pisos se revisa la primera mitad del trayecto en el piso de salida y la segunda mitad en el de llegada. La losa se suma una vez si cambia el piso.</p>
+            <p>Los muros cuentan por cruce transversal entre segmentos. La pérdida de cada muro equivale al valor editable por 10 cm multiplicado por su grosor en unidades de 10 cm. Entre pisos se revisan los muros del piso de salida, de cada piso intermedio y del de llegada. Se suma una losa por cada nivel atravesado.</p>
             <p>El mapa evalúa una cuadrícula de coordenadas y la pinta por intensidad. En la comparación, las filas son posiciones y las columnas son puntos. Se calcula el mínimo por fila y se elige el mayor de esos mínimos.</p>
           </div>
         </div>

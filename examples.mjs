@@ -1,6 +1,19 @@
 import { BANDS, MATERIALS } from './model.mjs';
 
-export const newFloor = () => ({ width: 9, height: 14, route: 'draw', background: null, walls: [], points: [] });
+export const newFloor = () => ({ width: 9, height: 14, route: 'draw', background: null, outline: null, walls: [], points: [] });
+export function removeFloor(building, index) {
+  if (building.count <= 1 || !Number.isInteger(index) || index < 0 || index >= building.count) {
+    throw new Error('Debe quedar al menos un piso en la vivienda.');
+  }
+  const shift = floor => floor > index ? floor - 1 : floor;
+  const floors = building.floors.filter((_, floor) => floor !== index)
+    .map((item, floor) => ({ ...item, points: item.points.map(point => ({ ...point, floor })) }));
+  const router = building.router?.floor === index ? null :
+    building.router ? { ...building.router, floor: shift(building.router.floor) } : null;
+  const positions = building.positions.filter(position => position.floor !== index)
+    .map(position => ({ ...position, floor: shift(position.floor) }));
+  return { ...building, floors, count: building.count - 1, router, positions };
+}
 const segment = (id, material, thickness, x1, y1, x2, y2) => ({
   id, material, thickness, a: { x: x1, y: y1 }, b: { x: x2, y: y2 }, losses: { ...MATERIALS[material].losses }
 });

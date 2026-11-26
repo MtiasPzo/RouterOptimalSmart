@@ -1,20 +1,27 @@
-import { BANDS, MATERIALS, EPSILON, estimate, comparePositions, calibratedDimensions, sameWall } from './model.mjs';
-import { newFloor, example } from './examples.mjs';
-import { canvasPoint, hitTest, paintMap } from './map.mjs';
+import { BANDS, MATERIALS, EPSILON, estimate, comparePositions, calibratedDimensions, sameWall,
+  pointInOutline, segmentInOutline, validOutline } from './model.mjs';
+import { newFloor, example, removeFloor } from './examples.mjs';
+import { canvasPoint, hitTest, paintMap, snapWallEnd, viewport, DISPLAY_CUTOFF_DBM } from './map.mjs';
 import { setupFieldHelp } from './field-help.mjs';
 
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
 const state = {
   building: example('one'), activeFloor: 0, band: '2.4', heat: true,
-  mode: 'router', marks: [], selection: null, draft: null, wallStart: null
+  mode: 'router', marks: [], selection: null, draft: null, wallStart: null, wallPreview: null,
+  outlineDraft: [], outlineHover: null
 };
 const canvas = $('#plan');
+const quickWallForm = $('#quick-wall-form');
+const quickWallField = name => quickWallForm.elements.namedItem(name);
+const quickDefaults = { material: 'tabique', thickness: 10 };
 const forms = Object.fromEntries(['building', 'dimensions', 'band', 'calibration', 'element', 'save']
   .map(key => [key, $(`#${key}-form`)]));
 const field = (form, name) => forms[form].elements.namedItem(name);
 const floor = () => state.building.floors[state.activeFloor];
+const ensureFloors = count => { while (state.building.floors.length < count) state.building.floors.push(newFloor()); };
 const ready = item => !item.background || item.background.calibrated;
+const pathReady = (building, from, to) => building.floors.slice(Math.min(from, to), Math.max(from, to) + 1).every(ready);
 const points = () => state.building.floors.slice(0, state.building.count).flatMap(item => item.points);
 const placements = () => state.building.positions.filter(position => position.floor < state.building.count);
 const numberFormat = new Intl.NumberFormat('es-CL', { maximumFractionDigits: 2 });
@@ -25,6 +32,8 @@ const targetMarks = new WeakMap();
 let nextId = 0;
 let noticeTimer;
 let exampleRequest = 0;
+let wallGesture = null;
+let suppressWallClick = false;
 
 function announce(message, error = false) {
   const el = $('#feedback');
@@ -69,11 +78,13 @@ function planCoordinate(p) {
 function inside(p, width, height) {
   return Number.isFinite(p.x) && Number.isFinite(p.y) && p.x >= 0 && p.y >= 0 && p.x <= width && p.y <= height;
 }
+function insideFloor(p, item) { return inside(p, item.width, item.height) && pointInOutline(p, item.outline); }
+function wallInsideFloor(a, b, item) { return insideFloor(a, item) && insideFloor(b, item) && segmentInOutline(a, b, item.outline); }
 
 function itemsOnFloor(item, index) {
   const router = state.building.router;
   return [
-    ...item.walls.flatMap(w => [w.a, w.b]), ...item.points,
+    ...item.walls.flatMap(w => [w.a, w.b]), ...item.points, ...(item.outline?.vertices ?? []),
     ...(router?.floor === index ? [router] : []),
     ...state.building.positions.filter(p => p.floor === index)
   ];
@@ -83,6 +94,10 @@ function setMode(mode) {
   state.mode = mode;
   state.marks = [];
   state.wallStart = null;
+  state.wallPreview = null;
+  state.outlineDraft = [];
+  state.outlineHover = null;
+  wallGesture = null;
   if (state.draft) state.selection = null;
   state.draft = null;
 }
@@ -93,6 +108,9 @@ function selectFloor(index) {
   setMode(ready(floor()) ? 'select' : 'calibration');
   write('calibration', { metres: '' });
   render();
+  const tabs = $('#floor-tabs');
+  const selected = tabs.children[index];
+  if (selected) tabs.scrollLeft = selected.offsetLeft - tabs.offsetLeft - (tabs.clientWidth - selected.clientWidth) / 2;
 }
 
 function renderPlan() {
@@ -105,19 +123,30 @@ function renderPlan() {
   }
   const hints = {
     select: 'Toca un muro o punto para editarlo. También puedes usar la lista de elementos.',
-    wall: state.draft ? 'Completa el material y el grosor en Elementos del plano.' :
-      state.wallStart ? 'Marca el segundo extremo del muro.' : 'Marca los dos extremos del muro.',
+    wall: state.draft ? 'Completa el muro en Elementos del plano.' :
+      state.wallPreview ? 'Suelta para colocar el muro.' :
+      state.wallStart ? 'Marca el segundo extremo o arrastra para dibujar.' :
+      'Mantén presionado y arrastra para dibujar. El muro se guarda al soltar.',
     point: 'Toca el lugar que quieres evaluar. Puedes cambiar su nombre en Elementos del plano.',
     router: state.building.router ? 'Toca otra posición disponible para mover el router.' :
       'Toca una posición disponible en este piso para colocar el router.',
     calibration: state.marks.length === 2 ? 'Ingresa la distancia real entre las marcas y confirma la escala.' :
       state.marks.length === 1 ? 'Marca el segundo extremo de una distancia conocida.' : 'Marca el primer extremo de una distancia conocida.',
-    crop: state.marks.length ? 'Marca la esquina opuesta del recorte.' : 'Marca una esquina de la vista que quieres usar.'
+    crop: state.marks.length ? 'Marca la esquina opuesta del recorte.' : 'Marca una esquina de la vista que quieres usar.',
+    outline: state.outlineDraft.length >= 3 ? 'Toca el primer vértice o pulsa Cerrar contorno.' :
+      'Marca las esquinas de la vivienda una por una.'
   };
   $('#map-hint').textContent = hints[state.mode];
   canvas.dataset.mode = state.mode;
   $('#calibration-form').hidden = state.mode !== 'calibration';
-  paintMap(canvas, state);
+  const coverage = paintMap(canvas, state);
+  const status = $('#coverage-status');
+  const router = state.building.router;
+  status.hidden = !state.heat || !router || !ready(floor()) ||
+    (pathReady(state.building, router.floor, state.activeFloor) && coverage > DISPLAY_CUTOFF_DBM);
+  if (!status.hidden) status.textContent = !pathReady(state.building, router.floor, state.activeFloor)
+    ? 'Confirma la escala de los pisos intermedios para proyectar la señal.'
+    : `La señal estimada no supera −90 dBm en ${floorName(state.activeFloor)}; el mapa ya no la colorea.`;
 }
 
 function renderControls() {
@@ -125,15 +154,30 @@ function renderControls() {
   const background = item.background;
   const band = BANDS[state.band];
   const bands = state.building.bands[state.band];
+  const countField = field('building', 'count');
+  countField.replaceChildren(...Array.from({ length: state.building.count + 1 }, (_, index) =>
+    option(String(index + 1), `${index + 1} ${index === 0 ? 'piso' : 'pisos'}`)));
   write('building', { count: state.building.count, floorHeight: state.building.floorHeight });
-  field('building', 'floorHeight').disabled = state.building.count === 1 && field('building', 'count').value === '1';
+  field('building', 'floorHeight').disabled = state.building.count === 1;
   write('dimensions', { width: item.width, height: item.height });
   write('band', bands);
-  for (const button of $$('[data-floor]')) {
-    const index = Number(button.dataset.floor);
-    button.hidden = index >= state.building.count;
+  const tabs = $('#floor-tabs');
+  while (tabs.children.length < state.building.count) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    tabs.append(button);
+  }
+  while (tabs.children.length > state.building.count) tabs.lastElementChild.remove();
+  for (const [index, button] of [...tabs.children].entries()) {
+    button.dataset.floor = String(index);
+    button.textContent = floorName(index);
     button.setAttribute('aria-pressed', String(state.activeFloor === index));
   }
+  $('#add-floor').setAttribute('aria-label', `Agregar piso ${state.building.count + 1}`);
+  $('#add-floor').title = `Agregar piso ${state.building.count + 1}`;
+  $('#delete-floor').disabled = state.building.count <= 1;
+  $('#delete-floor').setAttribute('aria-label', `Eliminar ${floorName(state.activeFloor)}`);
+  $('#delete-floor').title = `Eliminar ${floorName(state.activeFloor)}`;
   for (const button of $$('[data-band]')) button.setAttribute('aria-pressed', String(button.dataset.band === state.band));
   for (const label of $$('[data-band-label]')) label.textContent = band.label;
   for (const [name, route] of [['draw', 'draw'], ['import', 'import']]) {
@@ -194,17 +238,145 @@ function renderEditor() {
   } : { pointName: selected.name, x: selected.x, y: selected.y });
 }
 
+function selectedWall() {
+  if (state.mode !== 'select' || state.selection?.kind !== 'wall' || state.draft) return null;
+  return floor().walls.find(wall => wall.id === state.selection.id) ?? null;
+}
+
+function renderQuickWall() {
+  const wall = selectedWall();
+  const drawing = state.mode === 'wall' && ready(floor());
+  quickWallForm.hidden = !drawing && !wall;
+  if (quickWallForm.hidden) return;
+  $('#quick-wall-title').textContent = wall ? 'Editar muro' : 'Muro manual';
+  $('#quick-wall-subtitle').textContent = wall ? 'Cambios en este muro' : 'Arrastra sobre el plano';
+  $('#wall-snap-controls').hidden = !drawing;
+  $('#quick-wall-details').hidden = !wall;
+  $('#quick-wall-edit').hidden = !drawing || !state.selection?.id || !floor().walls.some(item => item.id === state.selection.id);
+  $('#quick-wall-save').hidden = !wall;
+  $('#quick-wall-delete').hidden = !wall;
+  quickWallField('material').value = wall?.material ?? quickDefaults.material;
+  quickWallField('thickness').value = wall ? Number((wall.thickness * 100).toPrecision(10)) : quickDefaults.thickness;
+  if (wall) {
+    for (const [name, value] of Object.entries({
+      loss24: wall.losses['2.4'], loss5: wall.losses['5'],
+      x: wall.a.x, y: wall.a.y, x2: wall.b.x, y2: wall.b.y
+    })) quickWallField(name).value = value;
+  } else $('#quick-wall-details').open = false;
+}
+
+function renderOutlinePanel() {
+  const visible = state.mode === 'outline' && ready(floor());
+  $('#outline-panel').hidden = !visible;
+  if (!visible) return;
+  const count = state.outlineDraft.length;
+  $('#outline-count').textContent = count ? `${count} ${count === 1 ? 'esquina marcada' : 'esquinas marcadas'}` :
+    floor().outline ? 'Marca esquinas para reemplazarlo' : 'Marca las esquinas de la vivienda';
+  $('#outline-undo').disabled = count === 0;
+  $('#outline-close').disabled = count < 3;
+  $('#outline-remove').disabled = !floor().outline;
+}
+
+function addOutlineVertex(p) {
+  if (!inside(p, floor().width, floor().height)) throw new Error('La esquina debe quedar dentro de las medidas del plano.');
+  const vertices = state.outlineDraft;
+  if (vertices.length && Math.hypot(p.x - vertices.at(-1).x, p.y - vertices.at(-1).y) < EPSILON) {
+    throw new Error('Marca una esquina distinta de la anterior.');
+  }
+  vertices.push(p);
+  state.outlineHover = null;
+  renderOutlinePanel();
+  renderPlan();
+}
+
+function finishOutline() {
+  const item = floor();
+  const vertices = state.outlineDraft;
+  if (!validOutline(vertices)) throw new Error('El contorno necesita al menos tres esquinas y no puede cruzarse consigo mismo.');
+  const material = $('#outline-material').value;
+  if (!MATERIALS[material]) throw new Error('Selecciona un material exterior.');
+  const thicknessInput = $('#outline-thickness');
+  const centimetres = thicknessInput.valueAsNumber;
+  if (!Number.isFinite(centimetres) || centimetres < 0.01 || centimetres > 10000) {
+    thicknessInput.focus();
+    throw new Error('El grosor exterior debe estar entre 0,01 y 10.000 cm.');
+  }
+  const readLoss = (id, band) => {
+    const input = $(id);
+    const value = input.valueAsNumber;
+    if (!Number.isFinite(value) || value < 0 || value > 1000) {
+      input.focus();
+      throw new Error(`La pérdida exterior a ${band} debe estar entre 0 y 1.000 dB.`);
+    }
+    return value;
+  };
+  const outline = { vertices: vertices.map(p => ({ ...p })), material,
+    thickness: centimetres / 100,
+    losses: { '2.4': readLoss('#outline-loss-24', '2,4 GHz'), '5': readLoss('#outline-loss-5', '5 GHz') } };
+  if (item.points.some(p => !pointInOutline(p, outline)) ||
+      (state.building.router?.floor === state.activeFloor && !pointInOutline(state.building.router, outline)) ||
+      state.building.positions.some(p => p.floor === state.activeFloor && !pointInOutline(p, outline)) ||
+      item.walls.some(w => !segmentInOutline(w.a, w.b, outline))) {
+    throw new Error('Hay elementos fuera del contorno. Muévelos o bórralos antes de cerrarlo.');
+  }
+  item.outline = outline;
+  state.selection = null;
+  setMode('select');
+  render();
+  announce('Contorno exterior guardado. Sus lados ahora cuentan como muros en el cálculo.');
+}
+
+function readQuickNumber(name, label, min, max) {
+  const input = quickWallField(name);
+  const n = input.valueAsNumber;
+  if (!Number.isFinite(n) || n < min || n > max) {
+    input.focus();
+    throw new Error(`${label} debe estar entre ${f(min)} y ${f(max)}.`);
+  }
+  return n;
+}
+
+function quickWallProperties() {
+  const material = quickWallField('material').value;
+  if (!MATERIALS[material]) throw new Error('Selecciona el material del muro.');
+  const thickness = readQuickNumber('thickness', 'El grosor en centímetros', 0.01, 10000);
+  return { material, thickness };
+}
+
+function snappedWallEnd(a, b) {
+  const rect = canvas.getBoundingClientRect();
+  const view = viewport(rect.width, rect.height, floor());
+  return snapWallEnd(a, b, view.w / floor().width, view.h / floor().height, {
+    horizontal: $('#snap-horizontal').checked, vertical: $('#snap-vertical').checked
+  });
+}
+
+function addDrawnWall(a, b) {
+  if (Math.hypot(b.x - a.x, b.y - a.y) < EPSILON) throw new Error('El muro necesita dos extremos distintos.');
+  if (!wallInsideFloor(a, b, floor())) throw new Error('El muro debe quedar dentro del contorno de la vivienda.');
+  if (floor().walls.some(wall => sameWall(wall, { a, b }))) throw new Error('Ya existe un muro con esos dos extremos.');
+  const { material, thickness } = quickWallProperties();
+  const id = `wall-${++nextId}`;
+  floor().walls = [...floor().walls, {
+    id, a, b, material, thickness: thickness / 100, losses: { ...MATERIALS[material].losses }
+  }];
+  state.selection = { kind: 'wall', id };
+  render();
+  announce('Muro dibujado. Puedes arrastrar otro o seleccionarlo para editar sus detalles.');
+}
+
 function referenceDetails(result, p, router) {
   const angle = result.angle === null ? 'sin dirección horizontal' : `${f(result.angle)}°`;
-  const walls = result.walls.map(w => `<span class="detail-line">${MATERIALS[w.material].label}, ${floorName(w.floor)} · ${f(w.loss)} dB</span>`).join('');
-  return `<details><summary>${result.walls.length} ${result.walls.length === 1 ? "muro" : "muros"}${result.differentFloor ? ' y losa' : ''}</summary>
+  const slabs = Math.abs(p.floor - router.floor);
+  const walls = result.walls.map(w => `<span class="detail-line">${w.id.startsWith('exterior-') ? 'Exterior · ' : ''}${MATERIALS[w.material].label}, ${floorName(w.floor)} · ${f(w.loss)} dB</span>`).join('');
+  return `<details><summary>${result.walls.length} ${result.walls.length === 1 ? "muro" : "muros"}${slabs ? ` y ${slabs} ${slabs === 1 ? 'losa' : 'losas'}` : ''}</summary>
     <span class="detail-line">Δx ${f(p.x - router.x)} m · Δy ${f(p.y - router.y)} m</span>
     <span class="detail-line">Δz ${f((p.floor - router.floor) * state.building.floorHeight)} m · θ ${angle}</span>
     <span class="detail-line">Espacio libre a 1 m · ${f(result.fspl)} dB</span>
     <span class="detail-line">Señal a 1 m · ${f(result.reference)} dBm</span>
     <span class="detail-line">Distancia · ${f(result.distanceLoss)} dB</span>
     <span class="detail-line">Muros · ${f(result.wallsLoss)} dB</span>
-    <span class="detail-line">Losa · ${f(result.slab)} dB</span>${walls}</details>`;
+    <span class="detail-line">${slabs === 1 ? 'Losa' : `Losas (${slabs})`} · ${f(result.slab)} dB</span>${walls}</details>`;
 }
 
 function renderResults() {
@@ -221,7 +393,7 @@ function renderResults() {
   } else {
     const rows = targets.map(p => {
       const name = `<td>${esc(p.name)}<small>${floorName(p.floor)}</small></td>`;
-      if (!ready(building.floors[p.floor])) return `<tr>${name}<td colspan="3">Escala pendiente</td></tr>`;
+      if (!pathReady(building, router.floor, p.floor)) return `<tr>${name}<td colspan="3">Escala pendiente en el trayecto entre pisos</td></tr>`;
       const result = estimate(router, p, building, band);
       return `<tr>${name}<td class="numeric">${f(result.d)} m</td><td>${referenceDetails(result, p, router)}</td>
         <td class="numeric"><strong>${f(result.signal)}</strong></td></tr>`;
@@ -238,11 +410,12 @@ function renderComparison(targets) {
   const { building, band } = state;
   const output = $('#comparison');
   if (!saved.length) { output.innerHTML = '<p>Guarda dos posiciones distintas para compararlas.</p>'; return; }
-  const usable = targets.length && [...targets, ...saved].every(item => ready(building.floors[item.floor]));
+  const usable = targets.length && saved.every(position =>
+    targets.every(target => pathReady(building, position.floor, target.floor)));
   const results = usable ? comparePositions(saved, targets, building, band) : saved.map(position => ({ position }));
   const leader = results[0];
   const ties = usable ? results.filter(result => Math.abs(result.minimum - leader.minimum) < EPSILON) : [];
-  let summary = 'Marca puntos de interés y confirma la escala en los pisos usados.';
+  let summary = 'Marca puntos de interés y confirma la escala en todos los pisos del trayecto.';
   if (usable) {
     if (saved.length === 1) summary = 'Guarda otra posición para comparar.';
     else if (ties.length > 1) summary = `Empate en ${f(leader.minimum)} dBm · ${ties.map(r => esc(r.position.name)).join(', ')}.`;
@@ -258,13 +431,84 @@ function renderComparison(targets) {
     <thead><tr><th scope="col">Posición</th><th scope="col">Señal más baja (dBm)</th>${cols}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
 }
 
-function render() { renderControls(); renderEditor(); renderPlan(); renderResults(); }
+function render() { renderControls(); renderEditor(); renderQuickWall(); renderOutlinePanel(); renderPlan(); renderResults(); }
 
 for (const [key, material] of Object.entries(MATERIALS)) field('element', 'material').add(option(key, material.label));
 field('element', 'material').add(option('', 'Elegir material'), 0);
+for (const [key, material] of Object.entries(MATERIALS)) quickWallField('material').add(option(key, material.label));
+for (const [key, material] of Object.entries(MATERIALS)) $('#outline-material').add(option(key, material.label));
+$('#outline-material').value = 'ladrillo';
+$('#outline-loss-24').value = MATERIALS.ladrillo.losses['2.4'];
+$('#outline-loss-5').value = MATERIALS.ladrillo.losses['5'];
+$('#outline-material').addEventListener('change', event => {
+  const material = MATERIALS[event.target.value];
+  $('#outline-loss-24').value = material.losses['2.4'];
+  $('#outline-loss-5').value = material.losses['5'];
+});
 field('element', 'material').addEventListener('change', () => {
   const material = MATERIALS[field('element', 'material').value];
   write('element', { loss24: material?.losses['2.4'], loss5: material?.losses['5'] });
+});
+quickWallField('material').addEventListener('change', () => {
+  const material = quickWallField('material').value;
+  if (selectedWall()) {
+    quickWallField('loss24').value = MATERIALS[material].losses['2.4'];
+    quickWallField('loss5').value = MATERIALS[material].losses['5'];
+  } else quickDefaults.material = material;
+});
+quickWallField('thickness').addEventListener('input', () => {
+  if (!selectedWall() && quickWallField('thickness').valueAsNumber > 0) {
+    quickDefaults.thickness = quickWallField('thickness').valueAsNumber;
+  }
+});
+quickWallForm.addEventListener('submit', event => {
+  event.preventDefault();
+  try {
+    const { material, thickness } = quickWallProperties();
+    const wall = selectedWall();
+    if (!wall) { Object.assign(quickDefaults, { material, thickness }); return; }
+    const item = floor();
+    const a = { x: readQuickNumber('x', 'Inicio X', 0, item.width), y: readQuickNumber('y', 'Inicio Y', 0, item.height) };
+    const b = { x: readQuickNumber('x2', 'Final X', 0, item.width), y: readQuickNumber('y2', 'Final Y', 0, item.height) };
+    if (Math.hypot(b.x - a.x, b.y - a.y) < EPSILON) throw new Error('El muro necesita dos extremos distintos.');
+    if (!wallInsideFloor(a, b, item)) throw new Error('El muro debe quedar dentro del contorno de la vivienda.');
+    if (item.walls.some(other => other.id !== wall.id && sameWall(other, { a, b }))) throw new Error('Ya existe un muro con esos dos extremos.');
+    const losses = { '2.4': readQuickNumber('loss24', 'La pérdida a 2,4 GHz', 0, 1000),
+      '5': readQuickNumber('loss5', 'La pérdida a 5 GHz', 0, 1000) };
+    item.walls = item.walls.map(other => other.id === wall.id
+      ? { ...wall, a, b, material, thickness: thickness / 100, losses } : other);
+    render();
+    announce('Muro actualizado.');
+  } catch (error) { announce(error.message, true); }
+});
+$('#quick-wall-edit').addEventListener('click', () => {
+  setMode('select');
+  renderEditor();
+  renderQuickWall();
+  renderPlan();
+});
+$('#outline-undo').addEventListener('click', () => {
+  state.outlineDraft.pop();
+  renderOutlinePanel();
+  renderPlan();
+});
+$('#outline-add-point').addEventListener('click', () => {
+  try {
+    const x = $('#outline-x').valueAsNumber, y = $('#outline-y').valueAsNumber;
+    addOutlineVertex({ x, y });
+    $('#outline-x').value = '';
+    $('#outline-y').value = '';
+    $('#outline-x').focus();
+  } catch (error) { announce(error.message, true); }
+});
+$('#outline-close').addEventListener('click', () => {
+  try { finishOutline(); } catch (error) { announce(error.message, true); }
+});
+$('#outline-remove').addEventListener('click', () => {
+  floor().outline = null;
+  state.outlineDraft = [];
+  render();
+  announce('Contorno exterior quitado.');
 });
 
 field('building', 'count').addEventListener('change', () => {
@@ -273,8 +517,10 @@ field('building', 'count').addEventListener('change', () => {
 listenForm('building', () => {
   const count = Number(field('building', 'count').value);
   const building = state.building;
-  const floorHeight = count === 2 ? readNumber('building', 'floorHeight', 'La altura', 0.01) : building.floorHeight;
-  if (count === 1 && building.router?.floor === 1) throw new Error('Mueve el router al piso 1 o quítalo antes de usar un solo piso.');
+  if (!Number.isSafeInteger(count) || count < 1) throw new Error('El número de pisos debe ser un entero positivo.');
+  const floorHeight = count > 1 ? readNumber('building', 'floorHeight', 'La altura', 0.01) : building.floorHeight;
+  if (building.router?.floor >= count) throw new Error(`Mueve el router a uno de los primeros ${count} pisos antes de reducir la vivienda.`);
+  ensureFloors(count);
   building.count = count;
   building.floorHeight = floorHeight;
   if (state.activeFloor >= count) selectFloor(0);
@@ -303,7 +549,28 @@ listenForm('band', () => {
   announce(`Parámetros de ${BANDS[state.band].label} actualizados.`);
 });
 
-$('#floor-tabs').addEventListener('click', event => { if (event.target.matches('[data-floor]')) selectFloor(Number(event.target.dataset.floor)); });
+$('#floor-tabs').addEventListener('click', event => {
+  if (event.target.matches('[data-floor]')) selectFloor(Number(event.target.dataset.floor));
+});
+$('#add-floor').addEventListener('click', () => {
+  const index = state.building.count;
+  ensureFloors(index + 1);
+  state.building.count = index + 1;
+  selectFloor(index);
+  announce(`${floorName(index)} agregado. Puedes modificar sus medidas y dibujar su contorno.`);
+});
+$('#delete-floor').addEventListener('click', () => {
+  const index = state.activeFloor;
+  const building = state.building;
+  if (building.count <= 1) return;
+  const item = floor();
+  const hasContent = Boolean(item.background || item.outline || item.walls.length || item.points.length ||
+    building.router?.floor === index || building.positions.some(position => position.floor === index));
+  if (hasContent && !window.confirm(`¿Eliminar ${floorName(index)}? Se borrarán su plano, sus elementos y las posiciones guardadas allí. Los pisos superiores se renumerarán.`)) return;
+  state.building = removeFloor(building, index);
+  selectFloor(Math.min(index, state.building.count - 1));
+  announce(`${floorName(index)} eliminado. Los pisos superiores se renumeraron.`);
+});
 $('#band-tabs').addEventListener('click', event => {
   if (!event.target.matches('[data-band]')) return;
   state.band = event.target.dataset.band;
@@ -313,7 +580,17 @@ $('#band-tabs').addEventListener('click', event => {
 });
 for (const button of $$('.tool[data-mode]')) button.addEventListener('click', () => {
   setMode(button.dataset.mode);
+  if (state.mode === 'outline') {
+    const current = floor().outline;
+    const material = current?.material ?? 'ladrillo';
+    $('#outline-material').value = material;
+    $('#outline-thickness').value = current ? Number((current.thickness * 100).toPrecision(10)) : 15;
+    $('#outline-loss-24').value = current?.losses['2.4'] ?? MATERIALS[material].losses['2.4'];
+    $('#outline-loss-5').value = current?.losses['5'] ?? MATERIALS[material].losses['5'];
+  }
   renderEditor();
+  renderQuickWall();
+  renderOutlinePanel();
   renderPlan();
 });
 $('#heat').addEventListener('change', event => { state.heat = event.target.checked; renderPlan(); });
@@ -323,7 +600,7 @@ $('#route-draw').addEventListener('click', () => {
   if (item.background && !window.confirm('¿Quitar el fondo importado de este piso? Se conservan las dimensiones y los elementos guardados.')) return;
   targetMarks.delete(item);
   Object.assign(item, { route: 'draw', background: null });
-  setMode('select');
+  setMode('wall');
   render();
 });
 $('#route-import').addEventListener('click', () => {
@@ -473,30 +750,99 @@ function useSelection(kind, id) {
   setMode('select');
   state.selection = { kind, id };
   renderEditor();
+  renderQuickWall();
   renderPlan();
 }
 
 function placeRouter(p) {
+  if (!insideFloor(p, floor())) throw new Error('El router debe quedar dentro del contorno de la vivienda.');
   state.building.router = { ...p, floor: state.activeFloor };
   state.selection = { kind: 'router', id: 'router' };
   render();
 }
 
+canvas.addEventListener('pointerdown', event => {
+  if (state.mode !== 'wall' || !ready(floor()) || event.button !== 0) return;
+  const hit = canvasPoint(canvas, event, floor());
+  if (!hit) return;
+  if (!insideFloor(planCoordinate(hit), floor())) { announce('Empieza el muro dentro del contorno.', true); return; }
+  canvas.setPointerCapture(event.pointerId);
+  wallGesture = { pointerId: event.pointerId, a: planCoordinate(hit), x: event.clientX, y: event.clientY, moved: false };
+});
+canvas.addEventListener('pointermove', event => {
+  if (!wallGesture || event.pointerId !== wallGesture.pointerId) return;
+  if (Math.hypot(event.clientX - wallGesture.x, event.clientY - wallGesture.y) < 5) return;
+  wallGesture.moved = true;
+  state.wallStart = null;
+  const hit = canvasPoint(canvas, event, floor());
+  if (!hit) return;
+  state.wallPreview = { a: wallGesture.a, b: snappedWallEnd(wallGesture.a, planCoordinate(hit)) };
+  renderPlan();
+});
+canvas.addEventListener('pointerup', event => {
+  if (!wallGesture || event.pointerId !== wallGesture.pointerId) return;
+  const gesture = wallGesture;
+  wallGesture = null;
+  if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+  state.wallPreview = null;
+  if (!gesture.moved && Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) < 5) return;
+  suppressWallClick = true;
+  setTimeout(() => { suppressWallClick = false; }, 0);
+  state.wallStart = null;
+  const hit = canvasPoint(canvas, event, floor());
+  if (!hit) { renderPlan(); announce('Termina el muro dentro del plano.', true); return; }
+  try { addDrawnWall(gesture.a, snappedWallEnd(gesture.a, planCoordinate(hit))); }
+  catch (error) { renderPlan(); announce(error.message, true); }
+});
+canvas.addEventListener('pointercancel', event => {
+  if (!wallGesture || event.pointerId !== wallGesture.pointerId) return;
+  wallGesture = null;
+  state.wallPreview = null;
+  renderPlan();
+});
+canvas.addEventListener('pointermove', event => {
+  if (state.mode !== 'outline' || !state.outlineDraft.length) return;
+  const hit = canvasPoint(canvas, event, floor());
+  state.outlineHover = hit ? planCoordinate(hit) : null;
+  renderPlan();
+});
+
 canvas.addEventListener('click', event => {
+  if (suppressWallClick) { suppressWallClick = false; return; }
   const hit = canvasPoint(canvas, event, floor());
   if (!hit) { announce('Marca una ubicación dentro del borde del plano.', true); return; }
   if (state.mode === 'crop') { markCrop(hit); return; }
   if (state.mode === 'calibration') { markCalibration(hit); return; }
   if (!ready(floor())) return;
   const p = planCoordinate(hit);
-  if (state.mode === 'router') { placeRouter(p); return; }
+  if (state.mode === 'outline') {
+    const vertices = state.outlineDraft;
+    if (vertices.length >= 3) {
+      const rect = canvas.getBoundingClientRect();
+      const view = viewport(rect.width, rect.height, floor());
+      if (Math.hypot((p.x - vertices[0].x) * view.w / floor().width,
+        (p.y - vertices[0].y) * view.h / floor().height) <= 16) {
+        try { finishOutline(); } catch (error) { announce(error.message, true); }
+        return;
+      }
+    }
+    try { addOutlineVertex(p); } catch (error) { announce(error.message, true); }
+    return;
+  }
+  if (state.mode === 'router') {
+    try { placeRouter(p); } catch (error) { announce(error.message, true); }
+    return;
+  }
   if (state.mode === 'wall') {
+    if (!insideFloor(p, floor())) { announce('Marca el muro dentro del contorno.', true); return; }
     if (!state.wallStart) { state.wallStart = p; renderPlan(); return; }
     if (Math.hypot(p.x - state.wallStart.x, p.y - state.wallStart.y) < EPSILON) {
       announce('El muro necesita dos extremos distintos.', true);
       return;
     }
-    state.draft = { kind: 'wall', a: state.wallStart, b: p };
+    const b = snappedWallEnd(state.wallStart, p);
+    if (!wallInsideFloor(state.wallStart, b, floor())) { announce('El muro debe quedar dentro del contorno.', true); return; }
+    state.draft = { kind: 'wall', a: state.wallStart, b };
     state.wallStart = null;
     state.selection = { kind: 'wall', id: 'new-wall' };
     renderEditor();
@@ -504,6 +850,7 @@ canvas.addEventListener('click', event => {
     return;
   }
   if (state.mode === 'point') {
+    if (!insideFloor(p, floor())) { announce('Marca el punto dentro del contorno.', true); return; }
     const id = `point-${++nextId}`;
     let index = floor().points.length + 1;
     while (floor().points.some(p => p.name === `Punto ${index}`)) index++;
@@ -515,6 +862,7 @@ canvas.addEventListener('click', event => {
   const router = state.building.router?.floor === state.activeFloor ? state.building.router : null;
   state.selection = hitTest(floor(), p, canvas, router);
   renderEditor();
+  renderQuickWall();
   renderPlan();
 });
 
@@ -527,6 +875,7 @@ $('#element-list').addEventListener('change', event => {
     state.selection = { kind, id };
     state.draft = { kind };
     renderEditor();
+    renderQuickWall();
     renderPlan();
     return;
   }
@@ -535,6 +884,7 @@ $('#element-list').addEventListener('change', event => {
   state.selection = null;
   setMode('select');
   renderEditor();
+  renderQuickWall();
   renderPlan();
 });
 $('#edit-router').addEventListener('click', () => useSelection('router', 'router'));
@@ -547,11 +897,13 @@ listenForm('element', () => {
     x: readNumber('element', 'x', 'La distancia desde la izquierda', 0, item.width),
     y: readNumber('element', 'y', 'La distancia desde arriba', 0, item.height)
   };
+  if (!insideFloor(a, item)) throw new Error('La posición debe quedar dentro del contorno de la vivienda.');
   if (kind === 'router') { placeRouter(a); announce('Posición del router actualizada.'); return; }
   if (wall) {
     const b = { x: readNumber('element', 'x2', 'La distancia final desde la izquierda', 0, item.width),
       y: readNumber('element', 'y2', 'La distancia final desde arriba', 0, item.height) };
     if (Math.hypot(a.x - b.x, a.y - b.y) < EPSILON) throw new Error('El muro necesita dos extremos distintos.');
+    if (!wallInsideFloor(a, b, item)) throw new Error('El muro debe quedar dentro del contorno de la vivienda.');
     if (item.walls.some(w => w.id !== id && sameWall(w, { a, b }))) throw new Error('Ya existe un muro con esos dos extremos.');
     const material = field('element', 'material').value;
     if (!MATERIALS[material]) { field('element', 'material').focus(); throw new Error('Selecciona el material del muro.'); }
@@ -576,7 +928,8 @@ listenForm('element', () => {
   }
   render();
 });
-$('#delete-element').addEventListener('click', () => {
+function deleteSelectedElement() {
+  if (!state.selection) return;
   const { kind, id } = state.selection;
   if (kind === 'router') state.building.router = null;
   if (kind === 'wall') floor().walls = floor().walls.filter(w => w.id !== id);
@@ -584,7 +937,9 @@ $('#delete-element').addEventListener('click', () => {
   state.selection = null;
   render();
   announce('Elemento borrado.');
-});
+}
+$('#delete-element').addEventListener('click', deleteSelectedElement);
+$('#quick-wall-delete').addEventListener('click', deleteSelectedElement);
 
 listenForm('save', () => {
   const { building } = state;
@@ -618,7 +973,7 @@ $('#comparison').addEventListener('click', event => {
 
 function occupied() {
   const { building } = state;
-  return building.router || building.positions.length || building.floors.some(item => item.background || item.walls.length || item.points.length);
+  return building.router || building.positions.length || building.floors.some(item => item.background || item.outline || item.walls.length || item.points.length);
 }
 
 $('#example').addEventListener('change', async event => {
