@@ -420,7 +420,7 @@ h1 { max-width: 850px; font-size: clamp(2.1rem, 4.3vw, 3.7rem); line-height: 1.0
 .button.small { min-height: 42px; }
 .map-toolbar { gap: 8px; padding: 13px 18px; background: #152b49; }
 .heat-toggle { min-height: 44px; color: #e2eaf6; font-size: .88rem; }
-input[type=checkbox] { accent-color: #e9c875; width: 1.15rem; height: 1.15rem; }
+input[type=checkbox]:not(#heat) { accent-color: #e9c875; width: 1.15rem; height: 1.15rem; }
 .map-stage { background-color: #0c1a2e; background-image: radial-gradient(#314765 1px, transparent 1px); background-size: 18px 18px; }
 #plan { height: clamp(330px, 41vw, 566px); }
 .map-footer { gap: 10px 18px; padding: 14px 20px; min-height: 66px; }
