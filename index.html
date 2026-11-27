@@ -143,8 +143,9 @@
           <div class="divider"></div>
           <div class="field-grid route-grid">
             <button type="button" class="button" id="route-draw">Dibujar</button>
-            <button type="button" class="button" id="route-import">Importar plano</button>
+            <button type="button" class="button" id="route-import" aria-describedby="import-unavailable" disabled>Importar plano</button>
           </div>
+          <p class="field-note import-unavailable" id="import-unavailable">Importar plano aún está en pruebas y no se puede usar por ahora.</p>
           <form id="dimensions-form" novalidate>
             <div class="field-grid">
               <div><label for="plan-width">Ancho (metros)</label><input id="plan-width" name="width" inputmode="decimal" type="number" step="any" data-help="Mide de izquierda a derecha el espacio que quieres representar en el plano. Por ejemplo, escribe 8 si el piso mide 8 metros de ancho."></div>
@@ -154,8 +155,8 @@
           </form>
           <div id="import-panel" hidden>
             <label for="file">Archivo del plano</label>
-            <input id="file" type="file" accept=".dwg,.png,.jpg,.jpeg,.webp,.bmp" data-help="Sube una imagen del piso que estás viendo, o un archivo DWG, que es un formato de dibujo técnico. Después podrás indicar cuánto mide el plano y marcar sus muros.">
-            <p class="field-note" id="import-status">Puedes subir una imagen o un dibujo técnico en formato DWG.</p>
+            <input id="file" type="file" accept=".dwg,.png,.jpg,.jpeg,.webp,.bmp" disabled data-help="Sube una imagen del piso que estás viendo, o un archivo DWG, que es un formato de dibujo técnico. Después podrás indicar cuánto mide el plano y marcar sus muros.">
+            <p class="field-note" id="import-status">La carga de archivos está temporalmente deshabilitada.</p>
             <div class="field-grid">
               <button type="button" class="button small" id="crop">Recortar vista</button>
               <button type="button" class="button small" id="calibrate">Marcar escala</button>

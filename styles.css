@@ -269,6 +269,7 @@ label + .field-with-help { margin-top: 5px; }
 .sample-options button:hover { background: var(--accent-soft); color: var(--accent-text); }
 .route-grid { margin-bottom: 12px; }
 .route-grid .button { margin-top: 0; }
+.route-grid + .import-unavailable { color: var(--danger); margin: 0 0 12px; }
 .divider { border-top: 1px solid var(--border); margin-block: 16px; }
 #import-panel .field-grid { margin-top: 10px; }
 #calibration-form { margin-top: 12px; }

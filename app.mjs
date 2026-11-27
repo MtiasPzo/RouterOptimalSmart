@@ -195,7 +195,7 @@ function renderControls() {
   $('#dimensions-form').hidden = item.route !== 'draw';
   $('#import-status').textContent = background
     ? `${background.name} · ${background.calibrated ? `${f(item.width)} × ${f(item.height)} m` : 'escala pendiente'}${background.note ? ` · ${background.note}` : ''}`
-    : 'Puedes subir una imagen o un dibujo técnico en formato DWG.';
+    : 'La carga de archivos está temporalmente deshabilitada.';
   $('#crop').disabled = !background;
   $('#calibrate').disabled = !background;
   const reference = ready(item) ? `${f(item.width)} × ${f(item.height)} m` : 'Escala pendiente';
