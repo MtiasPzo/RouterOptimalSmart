@@ -146,6 +146,12 @@
             <button type="button" class="button" id="route-import" aria-describedby="import-unavailable" disabled>Importar plano</button>
           </div>
           <p class="field-note import-unavailable" id="import-unavailable">Importar plano aún está en pruebas y no se puede usar por ahora.</p>
+          <div class="model-actions">
+            <button type="button" class="button" id="download-model">Descargar modelo</button>
+            <button type="button" class="button" id="load-model">Importar plano Router Smart</button>
+            <input id="model-file" type="file" accept=".json,application/json" hidden>
+          </div>
+          <p class="field-note model-save-note">Descarga una copia para conservar tu vivienda fuera de este navegador.</p>
           <form id="dimensions-form" novalidate>
             <div class="field-grid">
               <div><label for="plan-width">Ancho (metros)</label><input id="plan-width" name="width" inputmode="decimal" type="number" step="any" data-help="Mide de izquierda a derecha el espacio que quieres representar en el plano. Por ejemplo, escribe 8 si el piso mide 8 metros de ancho."></div>
@@ -219,7 +225,14 @@
       </article>
     </section>
 
-    <p id="feedback" class="feedback" role="status" aria-live="polite" hidden></p>
+    <dialog id="notice-dialog" class="notice-dialog" aria-labelledby="notice-title" aria-describedby="feedback">
+      <h2 id="notice-title">Aviso</h2>
+      <p id="feedback"></p>
+      <div class="notice-actions">
+        <button type="button" class="button" id="notice-cancel" hidden>Cancelar</button>
+        <button type="button" class="button primary" id="notice-confirm">Entendido</button>
+      </div>
+    </dialog>
 
     <section class="results" id="resultados" aria-label="Resultados de simulación">
       <article class="card result-card">

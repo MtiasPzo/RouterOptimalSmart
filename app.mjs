@@ -3,6 +3,7 @@ import { BANDS, MATERIALS, EPSILON, estimate, comparePositions, calibratedDimens
 import { newFloor, example, removeFloor } from './examples.mjs';
 import { canvasPoint, hitTest, paintMap, signalColor, snapWallEnd, viewport, DISPLAY_CUTOFF_DBM } from './map.mjs';
 import { setupFieldHelp } from './field-help.mjs';
+import { PROJECT_FORMAT, PROJECT_VERSION, validateProject } from './project-file.mjs';
 
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
@@ -32,20 +33,30 @@ const floorName = index => `Piso ${index + 1}`;
 const dot = value => `<i class="sig" style="background:${signalColor(value)}"></i>`;
 const targetMarks = new WeakMap();
 let nextId = 0;
-let noticeTimer;
 let exampleRequest = 0;
 let wallGesture = null;
 let suppressWallClick = false;
+let sessionTimer;
+let lastSavedModel = JSON.stringify(state.building);
+const SESSION_KEY = 'ros-model-recovery-v1';
 
-function announce(message, error = false) {
-  const el = $('#feedback');
-  el.hidden = false;
-  el.textContent = message;
-  el.dataset.error = String(error);
-  el.classList.add('floating');
-  clearTimeout(noticeTimer);
-  noticeTimer = setTimeout(() => { el.hidden = true; }, error ? 9500 : 4600);
+function showNotice(message, { error = false, confirm = false, action = 'Continuar' } = {}) {
+  const dialog = $('#notice-dialog');
+  if (dialog.open) dialog.close();
+  $('#notice-title').textContent = confirm ? 'Confirmar acción' : error ? 'Revisa este dato' : 'Aviso';
+  $('#feedback').textContent = message;
+  dialog.dataset.error = String(error);
+  dialog.returnValue = '';
+  $('#notice-cancel').hidden = !confirm;
+  $('#notice-confirm').textContent = confirm ? action : 'Entendido';
+  dialog.showModal();
+  $('#notice-confirm').focus();
+  return new Promise(resolve => dialog.addEventListener('close', () => resolve(dialog.returnValue === 'confirm'), { once: true }));
 }
+function announce(message, error = false) { void showNotice(message, { error }); }
+function ask(message, action) { return showNotice(message, { confirm: true, action }); }
+$('#notice-confirm').addEventListener('click', () => $('#notice-dialog').close('confirm'));
+$('#notice-cancel').addEventListener('click', () => $('#notice-dialog').close('cancel'));
 
 function listenForm(name, handler) {
   forms[name].addEventListener('submit', event => {
@@ -445,7 +456,7 @@ function renderComparison(targets) {
     <thead><tr><th scope="col">Posición</th><th scope="col">Señal más baja (dBm)</th>${cols}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
 }
 
-function render() { renderControls(); renderEditor(); renderQuickWall(); renderOutlinePanel(); renderPlan(); renderResults(); }
+function render() { renderControls(); renderEditor(); renderQuickWall(); renderOutlinePanel(); renderPlan(); renderResults(); scheduleRecovery(); }
 
 for (const [key, material] of Object.entries(MATERIALS)) field('element', 'material').add(option(key, material.label));
 field('element', 'material').add(option('', 'Elegir material'), 0);
@@ -564,14 +575,14 @@ $('#add-floor').addEventListener('click', () => {
   selectFloor(index);
   announce(`${floorName(index)} agregado. Puedes modificar sus medidas y dibujar su contorno.`);
 });
-$('#delete-floor').addEventListener('click', () => {
+$('#delete-floor').addEventListener('click', async () => {
   const index = state.activeFloor;
   const building = state.building;
   if (building.count <= 1) return;
   const item = floor();
   const hasContent = Boolean(item.background || item.outline || item.walls.length || item.points.length ||
     building.router?.floor === index || building.positions.some(position => position.floor === index));
-  if (hasContent && !window.confirm(`¿Eliminar ${floorName(index)}? Se borrarán su plano, sus elementos y las posiciones guardadas allí. Los pisos superiores se renumerarán.`)) return;
+  if (hasContent && !await ask(`¿Eliminar ${floorName(index)}? Se borrarán su plano, sus elementos y las posiciones guardadas allí. Los pisos superiores se renumerarán.`, 'Eliminar piso')) return;
   state.building = removeFloor(building, index);
   selectFloor(Math.min(index, state.building.count - 1));
   announce(`${floorName(index)} eliminado. Los pisos superiores se renumeraron.`);
@@ -601,9 +612,9 @@ for (const button of $$('.tool[data-mode]')) button.addEventListener('click', ()
 });
 $('#heat').addEventListener('change', event => { state.heat = event.target.checked; renderPlan(); pulse(); });
 
-$('#route-draw').addEventListener('click', () => {
+$('#route-draw').addEventListener('click', async () => {
   const item = floor();
-  if (item.background && !window.confirm('¿Quitar el fondo importado de este piso? Se conservan las dimensiones y los elementos guardados.')) return;
+  if (item.background && !await ask('¿Quitar el fondo importado de este piso? Se conservan las dimensiones y los elementos guardados.', 'Quitar fondo')) return;
   targetMarks.delete(item);
   Object.assign(item, { route: 'draw', background: null });
   setMode('wall');
@@ -650,6 +661,90 @@ async function convertDwg(file) {
 function background(image, name, note = '') {
   return { image, name, note, calibrated: false, crop: { x: 0, y: 0, width: image.naturalWidth, height: image.naturalHeight } };
 }
+
+function imageSource(image) {
+  const match = image.src.match(/\/assets\/(planta-baja|planta-alta)\.png(?:$|\?)/);
+  if (match) return `./assets/${match[1]}.png`;
+  const surface = document.createElement('canvas');
+  surface.width = image.naturalWidth;
+  surface.height = image.naturalHeight;
+  surface.getContext('2d').drawImage(image, 0, 0);
+  return surface.toDataURL('image/png');
+}
+
+function captureProject() {
+  const building = { ...state.building, floors: state.building.floors.map(item => ({
+    ...item, background: item.background ? {
+      name: item.background.name, note: item.background.note,
+      calibrated: item.background.calibrated, crop: item.background.crop,
+      src: imageSource(item.background.image)
+    } : null
+  })) };
+  return { format: PROJECT_FORMAT, version: PROJECT_VERSION, building,
+    activeFloor: state.activeFloor, band: state.band, heat: state.heat };
+}
+
+function saveRecovery() {
+  try { localStorage.setItem(SESSION_KEY, JSON.stringify(captureProject())); }
+  catch { /* El archivo descargado sigue disponible si el navegador limita el almacenamiento. */ }
+}
+function scheduleRecovery() {
+  clearTimeout(sessionTimer);
+  sessionTimer = setTimeout(saveRecovery, 350);
+}
+
+async function applyProject(project) {
+  validateProject(project);
+  const building = project.building;
+  for (const item of building.floors) {
+    if (!item.background) continue;
+    const saved = item.background;
+    const image = await loadImage(saved.src);
+    if (saved.crop.x + saved.crop.width > image.naturalWidth ||
+        saved.crop.y + saved.crop.height > image.naturalHeight) throw new Error('El recorte de una imagen no es válido.');
+    item.background = { image, name: saved.name, note: saved.note || '',
+      calibrated: saved.calibrated, crop: saved.crop };
+  }
+  state.building = building;
+  state.activeFloor = project.activeFloor;
+  state.band = project.band;
+  state.heat = project.heat;
+  $('#heat').checked = project.heat;
+  nextId = Math.max(0, ...building.floors.flatMap(item => [...item.walls, ...item.points].map(entry => Number(entry.id.match(/\d+$/)?.[0]) || 0)),
+    ...building.positions.map(entry => Number(entry.id.match(/\d+$/)?.[0]) || 0));
+  state.selection = null;
+  setMode(ready(floor()) ? 'select' : 'calibration');
+  render();
+}
+
+$('#download-model').addEventListener('click', () => {
+  try {
+    const project = captureProject();
+    const json = JSON.stringify(project, null, 2);
+    const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `router-smart-modelo-${new Date().toISOString().slice(0, 10)}.json`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    lastSavedModel = JSON.stringify(project);
+    announce('Modelo preparado para descargar. Consérvalo para volver a abrirlo aquí.');
+  } catch (error) { announce(`No se pudo preparar el modelo: ${error.message}`, true); }
+});
+$('#load-model').addEventListener('click', () => $('#model-file').click());
+$('#model-file').addEventListener('change', async event => {
+  const file = event.target.files[0];
+  event.target.value = '';
+  if (!file) return;
+  try {
+    if (file.size > 25 * 1024 * 1024) throw new Error('El archivo supera los 25 MB permitidos.');
+    const project = validateProject(JSON.parse(await file.text()));
+    if (occupied() && !await ask('¿Abrir este modelo? Reemplazará la vivienda y las posiciones actuales. Descarga el modelo actual si deseas conservarlo.', 'Abrir modelo')) return;
+    await applyProject(project);
+    lastSavedModel = JSON.stringify(captureProject());
+    announce('Modelo Router Smart cargado. Ya puedes seguir editándolo.');
+  } catch (error) { announce(`No se pudo abrir el modelo: ${error.message}`, true); }
+});
 
 $('#file').addEventListener('change', async event => {
   const input = event.currentTarget;
@@ -998,7 +1093,7 @@ function occupied() {
 
 async function loadExample(key) {
   const request = ++exampleRequest;
-  if (occupied() && !window.confirm('¿Cargar otro escenario? Se reemplazarán los elementos y las posiciones de la sesión.')) return;
+  if (occupied() && !await ask('¿Cargar otro escenario? Se reemplazarán los elementos y las posiciones de la sesión. Descarga el modelo actual si deseas conservarlo.', 'Cargar escenario')) return;
   const build = example(key);
   if (key === 'cad') {
     try {
@@ -1064,7 +1159,27 @@ applyTheme(document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light')
 
 setupFieldHelp();
 new ResizeObserver(() => paintMap(canvas, state)).observe(canvas);
-render();
+async function restoreRecovery() {
+  try {
+    const saved = localStorage.getItem(SESSION_KEY);
+    if (saved) await applyProject(JSON.parse(saved));
+    else render();
+  } catch {
+    try { localStorage.removeItem(SESSION_KEY); } catch { /* Almacenamiento no disponible. */ }
+    render();
+  }
+  lastSavedModel = JSON.stringify(captureProject());
+}
+void restoreRecovery();
+window.addEventListener('beforeunload', event => {
+  try {
+    if (JSON.stringify(captureProject()) === lastSavedModel) return;
+    event.preventDefault();
+    event.returnValue = '';
+  } catch { /* El navegador puede cerrar la página sin aviso. */ }
+});
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveRecovery(); });
+window.addEventListener('pagehide', saveRecovery);
 
 
 

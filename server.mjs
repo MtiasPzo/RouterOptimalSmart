@@ -7,7 +7,7 @@ const mime = {
   html: 'text/html; charset=utf-8', css: 'text/css; charset=utf-8',
   mjs: 'text/javascript; charset=utf-8', js: 'text/javascript; charset=utf-8', wasm: 'application/wasm', png: 'image/png', webp: 'image/webp'
 };
-const publicFile = /^(?:index\.html|styles\.css|(?:app|model|map|examples|cad|cad-worker|field-help)\.mjs|assets\/[\w-]+\.(?:png|webp))$/;
+const publicFile = /^(?:index\.html|styles\.css|(?:app|model|project-file|map|examples|cad|cad-worker|field-help)\.mjs|assets\/[\w-]+\.(?:png|webp))$/;
 
 const cadFiles = {
   'cad-runtime/dist/libredwg-web.js': 'node_modules/@mlightcad/libredwg-web/dist/libredwg-web.js',

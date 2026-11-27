@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
-    "test": "node --test tests/model.test.mjs"
+    "test": "node --test tests/model.test.mjs tests/project-file.test.mjs"
   },
   "dependencies": { "@mlightcad/libredwg-web": "0.9.3" },
   "engines": { "node": ">=20" }
